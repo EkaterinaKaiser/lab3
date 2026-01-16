@@ -41,27 +41,59 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd ~
-            # Останавливаем и удаляем контейнеры, если docker-compose.yml существует
+            echo "=== Stopping all running containers ==="
+            # Останавливаем ВСЕ запущенные контейнеры
+            docker ps -q | while read container_id; do
+              if [ -n "$container_id" ]; then
+                echo "Stopping container: $container_id"
+                docker stop "$container_id" || true
+              fi
+            done
+            
+            echo "=== Removing containers by name (attacker, victim) ==="
+            # Удаляем контейнеры с конфликтующими именами
+            docker ps -a --filter "name=attacker" -q | xargs -r docker rm -f || true
+            docker ps -a --filter "name=victim" -q | xargs -r docker rm -f || true
+            
+            echo "=== Stopping docker-compose containers ==="
+            # Останавливаем и удаляем контейнеры из docker-compose, если файл существует
             if [ -f docker-compose.yml ]; then
               docker compose down -v --remove-orphans || true
             fi
-            # Удаляем все контейнеры
+            
+            echo "=== Removing all stopped containers ==="
+            # Удаляем все остановленные контейнеры
             docker container prune -f || true
+            
+            echo "=== Removing conflicting networks ==="
             # Удаляем конфликтующие сети с подсетью 172.20.0.0/16
             docker network ls --format "{{.ID}} {{.Name}}" | while read net_id net_name; do
-              if docker network inspect "$net_id" 2>/dev/null | grep -q "172.20.0.0/16"; then
-                echo "Removing conflicting network: $net_name ($net_id)"
-                docker network rm "$net_id" 2>/dev/null || true
+              if [ -n "$net_id" ] && [ "$net_id" != "NETWORK" ]; then
+                if docker network inspect "$net_id" 2>/dev/null | grep -q "172.20.0.0/16"; then
+                  echo "Removing conflicting network: $net_name ($net_id)"
+                  docker network rm "$net_id" 2>/dev/null || true
+                fi
               fi
             done
+            
+            echo "=== Removing unused networks ==="
             # Удаляем неиспользуемые сети
             docker network prune -f || true
+            
+            echo "=== Removing unused images ==="
             # Удаляем неиспользуемые образы
             docker image prune -a -f || true
+            
+            echo "=== Removing unused volumes ==="
             # Удаляем неиспользуемые volumes
             docker volume prune -f || true
+            
+            echo "=== Full system cleanup ==="
             # Полная очистка системы
             docker system prune -a -f --volumes || true
+            
+            echo "=== Cleanup completed ==="
+            docker ps -a
 
       - name: Deploy to remote server via SSH
         uses: appleboy/ssh-action@v1.0.0
