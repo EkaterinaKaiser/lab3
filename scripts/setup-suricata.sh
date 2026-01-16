@@ -198,6 +198,7 @@ af-packet:\
 fi
 
 # Если Docker bridge найден и отличается от основного интерфейса, добавляем его
+DOCKER_BRIDGE_ADDED=false
 if [ -n "$DOCKER_BRIDGE" ] && [ "$DOCKER_BRIDGE" != "$ACTIVE_INTERFACE" ] && ip link show "$DOCKER_BRIDGE" &>/dev/null; then
   echo "Adding Docker bridge $DOCKER_BRIDGE to af-packet configuration..."
   if ! grep -A 20 "^af-packet:" /etc/suricata/suricata.yaml | grep -q "interface: $DOCKER_BRIDGE"; then
@@ -209,7 +210,13 @@ if [ -n "$DOCKER_BRIDGE" ] && [ "$DOCKER_BRIDGE" != "$ACTIVE_INTERFACE" ] && ip 
     defrag: yes\
     use-mmap: yes\
     tpacket-v3: yes' /etc/suricata/suricata.yaml
+    DOCKER_BRIDGE_ADDED=true
+    echo "✅ Docker bridge $DOCKER_BRIDGE added to configuration"
+  else
+    echo "✅ Docker bridge $DOCKER_BRIDGE already in configuration"
   fi
+elif [ -n "$DOCKER_BRIDGE" ]; then
+  echo "⚠️  Docker bridge $DOCKER_BRIDGE found but interface does not exist yet (will be added when Docker network is created)"
 fi
 
 # Проверяем, что интерфейсы существуют
@@ -272,6 +279,11 @@ fi
 
 # Убеждаемся, что после теста конфигурации мы продолжаем работу
 echo "Configuration test completed, continuing with setup..."
+
+# Если Docker bridge был добавлен, нужно перезапустить Suricata
+if [ "$DOCKER_BRIDGE_ADDED" = "true" ] && [ -n "$DOCKER_BRIDGE" ]; then
+  echo "Docker bridge was added, Suricata will need to be restarted after Docker network is created"
+fi
 
 # Перезапускаем Suricata после создания Docker сети и загрузки правил
 echo "Preparing to start Suricata..."

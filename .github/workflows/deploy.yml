@@ -211,6 +211,33 @@ jobs:
           script: |
             chmod +x ~/scripts/setup-suricata.sh
             bash ~/scripts/setup-suricata.sh
+            
+            # Перезапускаем Suricata после создания Docker сети, чтобы он увидел Docker bridge
+            echo "=== Restarting Suricata after Docker network creation ==="
+            sleep 5  # Даем время Docker сети полностью инициализироваться
+            
+            # Находим Docker bridge интерфейс
+            DOCKER_BRIDGE=$(docker network inspect vulnnet 2>/dev/null | jq -r '.[0].Options."com.docker.network.bridge.name" // empty' 2>/dev/null || echo "")
+            if [ -z "$DOCKER_BRIDGE" ]; then
+              DOCKER_BRIDGE=$(ip -br link show | grep -E '^br-' | awk '{print $1}' | head -1 || echo "")
+            fi
+            
+            if [ -n "$DOCKER_BRIDGE" ] && ip link show "$DOCKER_BRIDGE" &>/dev/null; then
+              echo "Found Docker bridge: $DOCKER_BRIDGE"
+              echo "Restarting Suricata to monitor Docker network..."
+              sudo systemctl stop suricata 2>/dev/null || true
+              sudo pkill -9 suricata 2>/dev/null || true
+              sleep 2
+              sudo systemctl start suricata || sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D || true
+              sleep 3
+              if pgrep -x suricata > /dev/null; then
+                echo "✅ Suricata restarted and should now see Docker network traffic"
+              else
+                echo "⚠️  Suricata restart failed"
+              fi
+            else
+              echo "⚠️  Docker bridge not found, Suricata may not see Docker traffic"
+            fi
 
       - name: Install tools on attacker container
         uses: appleboy/ssh-action@v1.0.0
@@ -247,7 +274,21 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             echo "=== Waiting for services to be ready ==="
-            sleep 15
+            sleep 20
+            
+            # Проверяем, что Kafka запустился и слушает на порту
+            echo "Checking Kafka readiness..."
+            for i in {1..30}; do
+              if docker exec victim-kafka nc -z localhost 29092 2>/dev/null; then
+                echo "✅ Kafka is ready on port 29092"
+                break
+              fi
+              if [ $i -eq 30 ]; then
+                echo "⚠️  Kafka may not be ready, checking logs..."
+                docker logs victim-kafka --tail 20 || true
+              fi
+              sleep 1
+            done
             
             echo "=== Checking container status ==="
             docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "attacker|victim|zookeeper|kafka" || docker ps
@@ -281,6 +322,39 @@ jobs:
               echo "❌ Custom rules file not found at /etc/suricata/rules/local.rules!"
               echo "Checking if rules were copied:"
               ls -la ~/rules/ 2>/dev/null || echo "~/rules/ directory not found"
+            fi
+            
+            echo ""
+            echo "=== Ensuring Suricata monitors Docker network ==="
+            # Находим Docker bridge и убеждаемся, что Suricata его мониторит
+            DOCKER_BRIDGE=$(docker network inspect vulnnet 2>/dev/null | jq -r '.[0].Options."com.docker.network.bridge.name" // empty' 2>/dev/null || echo "")
+            if [ -z "$DOCKER_BRIDGE" ]; then
+              DOCKER_BRIDGE=$(ip -br link show | grep -E '^br-' | awk '{print $1}' | head -1 || echo "")
+            fi
+            
+            if [ -n "$DOCKER_BRIDGE" ] && ip link show "$DOCKER_BRIDGE" &>/dev/null; then
+              echo "Found Docker bridge: $DOCKER_BRIDGE"
+              # Проверяем, что интерфейс в конфигурации Suricata
+              if ! grep -A 20 "^af-packet:" /etc/suricata/suricata.yaml | grep -q "interface: $DOCKER_BRIDGE"; then
+                echo "⚠️  Docker bridge $DOCKER_BRIDGE not in Suricata config, adding it..."
+                sudo sed -i '/^af-packet:/a\
+  - interface: '"$DOCKER_BRIDGE"'\
+    cluster-id: 98\
+    cluster-type: cluster_flow\
+    defrag: yes\
+    use-mmap: yes\
+    tpacket-v3: yes' /etc/suricata/suricata.yaml
+                echo "Restarting Suricata to apply new interface..."
+                sudo systemctl stop suricata 2>/dev/null || true
+                sudo pkill -9 suricata 2>/dev/null || true
+                sleep 2
+                sudo systemctl start suricata || sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D || true
+                sleep 3
+              else
+                echo "✅ Docker bridge $DOCKER_BRIDGE is in Suricata configuration"
+              fi
+            else
+              echo "⚠️  Docker bridge not found"
             fi
             
             echo "=== Executing attacks from attacker container ==="
