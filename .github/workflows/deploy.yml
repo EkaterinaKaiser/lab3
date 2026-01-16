@@ -337,13 +337,11 @@ jobs:
               # Проверяем, что интерфейс в конфигурации Suricata
               if ! grep -A 20 "^af-packet:" /etc/suricata/suricata.yaml | grep -q "interface: $DOCKER_BRIDGE"; then
                 echo "⚠️  Docker bridge $DOCKER_BRIDGE not in Suricata config, adding it..."
-                sudo sed -i '/^af-packet:/a\
-  - interface: '"$DOCKER_BRIDGE"'\
-    cluster-id: 98\
-    cluster-type: cluster_flow\
-    defrag: yes\
-    use-mmap: yes\
-    tpacket-v3: yes' /etc/suricata/suricata.yaml
+                # Создаем временный файл с конфигурацией интерфейса используя printf
+                sudo printf '  - interface: %s\n    cluster-id: 98\n    cluster-type: cluster_flow\n    defrag: yes\n    use-mmap: yes\n    tpacket-v3: yes\n' "$DOCKER_BRIDGE" > /tmp/suricata_bridge_config.txt
+                # Вставляем после строки af-packet:
+                sudo sed -i '/^af-packet:/r /tmp/suricata_bridge_config.txt' /etc/suricata/suricata.yaml
+                sudo rm -f /tmp/suricata_bridge_config.txt
                 echo "Restarting Suricata to apply new interface..."
                 sudo systemctl stop suricata 2>/dev/null || true
                 sudo pkill -9 suricata 2>/dev/null || true
