@@ -24,21 +24,6 @@ jobs:
       - name: Install Docker Compose
         run: docker compose version
 
-      - name: Clean up existing containers
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd ~
-            docker compose down -v --remove-orphans || true
-            docker container prune -f || true
-            docker image prune -a -f || true
-            docker volume prune -f || true
-            docker network prune -f || true
-            docker system prune -a -f --volumes || true
-
       - name: Copy project files to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -47,6 +32,36 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "docker-compose.yml,scripts/"
           target: "~"
+
+      - name: Clean up existing containers and networks
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~
+            # Останавливаем и удаляем контейнеры, если docker-compose.yml существует
+            if [ -f docker-compose.yml ]; then
+              docker compose down -v --remove-orphans || true
+            fi
+            # Удаляем все контейнеры
+            docker container prune -f || true
+            # Удаляем конфликтующие сети с подсетью 172.20.0.0/16
+            docker network ls --format "{{.ID}} {{.Name}}" | while read net_id net_name; do
+              if docker network inspect "$net_id" 2>/dev/null | grep -q "172.20.0.0/16"; then
+                echo "Removing conflicting network: $net_name ($net_id)"
+                docker network rm "$net_id" 2>/dev/null || true
+              fi
+            done
+            # Удаляем неиспользуемые сети
+            docker network prune -f || true
+            # Удаляем неиспользуемые образы
+            docker image prune -a -f || true
+            # Удаляем неиспользуемые volumes
+            docker volume prune -f || true
+            # Полная очистка системы
+            docker system prune -a -f --volumes || true
 
       - name: Deploy to remote server via SSH
         uses: appleboy/ssh-action@v1.0.0
@@ -77,6 +92,19 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            # Ждем, пока контейнер attacker запустится
+            timeout=60
+            counter=0
+            while ! docker ps --format "{{.Names}}" | grep -q "^attacker$"; do
+              if [ $counter -ge $timeout ]; then
+                echo "Error: attacker container did not start within $timeout seconds"
+                exit 1
+              fi
+              echo "Waiting for attacker container to start... ($counter/$timeout)"
+              sleep 2
+              counter=$((counter + 2))
+            done
+            echo "Attacker container is running, installing tools..."
             docker exec attacker bash -c "apt update && apt install -y vim nmap jq metasploit-framework netcat-traditional telnet smbclient redis-tools python3-pip python3-venv curl wget python3 awscli openssh-client hydra python2.7 python2.7-dev git gcc file openjdk-11-jre"
 
       - name: Deployment status
