@@ -1,10 +1,10 @@
 # Правила Suricata для защиты от атак на PostgreSQL и Kafka
 
 # Защита от SQL Injection на PostgreSQL
-# Ищем паттерны в данных PostgreSQL протокола (Q - query message)
-alert tcp any any -> 172.20.0.20 5432 (msg:"ET EXPLOIT SQL Injection Attempt on PostgreSQL - OR 1=1"; flow:to_server,established; content:"|51|"; offset:0; depth:1; content:"OR"; nocase; distance:1; pcre:"/OR\s+['\"]?1['\"]?\s*=\s*['\"]?1['\"]?/i"; sid:1000001; rev:1;)
-alert tcp any any -> 172.20.0.20 5432 (msg:"ET EXPLOIT SQL Injection UNION SELECT"; flow:to_server,established; content:"UNION"; nocase; content:"SELECT"; nocase; distance:0; within:50; sid:1000002; rev:1;)
-alert tcp any any -> 172.20.0.20 5432 (msg:"ET EXPLOIT SQL Injection DROP TABLE"; flow:to_server,established; content:"DROP"; nocase; content:"TABLE"; nocase; distance:0; within:50; sid:1000003; rev:1;)
+# Упрощенные правила для обнаружения SQL injection паттернов
+alert tcp any any -> 172.20.0.20 5432 (msg:"ET EXPLOIT SQL Injection Attempt on PostgreSQL - OR 1=1"; flow:to_server,established; content:"OR"; nocase; pcre:"/OR\s+['\"]?1['\"]?\s*=\s*['\"]?1['\"]?/i"; sid:1000001; rev:1;)
+alert tcp any any -> 172.20.0.20 5432 (msg:"ET EXPLOIT SQL Injection UNION SELECT"; flow:to_server,established; content:"UNION"; nocase; content:"SELECT"; nocase; distance:0; within:100; sid:1000002; rev:1;)
+alert tcp any any -> 172.20.0.20 5432 (msg:"ET EXPLOIT SQL Injection DROP TABLE"; flow:to_server,established; content:"DROP"; nocase; content:"TABLE"; nocase; distance:0; within:100; sid:1000003; rev:1;)
 
 # Защита от Brute Force на PostgreSQL (любые соединения к порту)
 alert tcp any any -> 172.20.0.20 5432 (msg:"ET POLICY PostgreSQL Connection Attempt"; flow:to_server; flags:S; threshold:type threshold, track by_src, count 3, seconds 10; sid:1000004; rev:1;)
@@ -12,13 +12,16 @@ alert tcp any any -> 172.20.0.20 5432 (msg:"ET POLICY PostgreSQL Connection Atte
 # Защита от несанкционированного доступа к PostgreSQL
 alert tcp 172.20.0.10 any -> 172.20.0.20 5432 (msg:"ET POLICY PostgreSQL Connection from Attacker Container"; flow:to_server; flags:S; sid:1000005; rev:1;)
 
-# Защита от атак на Kafka
-alert tcp any any -> 172.20.0.31 9092 (msg:"ET EXPLOIT Kafka Unauthorized Topic Creation Attempt - malicious-topic"; flow:to_server,established; content:"malicious-topic"; nocase; sid:1000006; rev:1;)
-alert tcp any any -> 172.20.0.31 9092 (msg:"ET EXPLOIT Kafka Protocol Exploitation Attempt"; flow:to_server,established; content:"|00 00 00 01 00|"; sid:1000007; rev:1;)
-alert tcp any any -> 172.20.0.31 9092 (msg:"ET EXPLOIT Kafka Malicious Payload Injection"; flow:to_server,established; content:"malicious payload"; nocase; sid:1000008; rev:1;)
+# Защита от атак на Kafka (порты 9092 и 29092)
+alert tcp any any -> 172.20.0.31 29092 (msg:"ET EXPLOIT Kafka Unauthorized Topic Creation Attempt - malicious-topic"; flow:to_server,established; content:"malicious-topic"; nocase; sid:1000006; rev:1;)
+alert tcp any any -> 172.20.0.31 29092 (msg:"ET EXPLOIT Kafka Protocol Exploitation Attempt"; flow:to_server,established; content:"|00 00 00 01 00|"; sid:1000007; rev:1;)
+alert tcp any any -> 172.20.0.31 29092 (msg:"ET EXPLOIT Kafka Malicious Payload Injection"; flow:to_server,established; content:"malicious payload"; nocase; sid:1000008; rev:1;)
+alert tcp any any -> 172.20.0.31 9092 (msg:"ET EXPLOIT Kafka Unauthorized Topic Creation Attempt - malicious-topic"; flow:to_server,established; content:"malicious-topic"; nocase; sid:1000006; rev:2;)
+alert tcp any any -> 172.20.0.31 9092 (msg:"ET EXPLOIT Kafka Protocol Exploitation Attempt"; flow:to_server,established; content:"|00 00 00 01 00|"; sid:1000007; rev:2;)
 
 # Защита от несанкционированного доступа к Kafka
-alert tcp 172.20.0.10 any -> 172.20.0.31 9092 (msg:"ET POLICY Kafka Connection from Attacker Container"; flow:to_server; flags:S; sid:1000009; rev:1;)
+alert tcp 172.20.0.10 any -> 172.20.0.31 29092 (msg:"ET POLICY Kafka Connection from Attacker Container"; flow:to_server; flags:S; sid:1000009; rev:1;)
+alert tcp 172.20.0.10 any -> 172.20.0.31 9092 (msg:"ET POLICY Kafka Connection from Attacker Container"; flow:to_server; flags:S; sid:1000009; rev:2;)
 
 # Общая защита от подозрительной активности от attacker контейнера
 alert tcp 172.20.0.10 any -> 172.20.0.0/16 any (msg:"ET POLICY Suspicious Activity from Attacker Container"; flow:to_server; flags:S; threshold:type threshold, track by_dst, count 5, seconds 30; sid:1000010; rev:1;)

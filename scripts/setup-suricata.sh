@@ -57,10 +57,23 @@ if [ -f ~/rules/suricata-rules.rules ]; then
   
   # Убеждаемся, что локальные правила включены в конфигурации
   if ! grep -q "local.rules" /etc/suricata/suricata.yaml 2>/dev/null; then
-    # Добавляем правило-файл в конфигурацию
-    sudo sed -i '/default-rule-path:/a\  - local.rules' /etc/suricata/suricata.yaml || \
-    sudo sed -i '/rule-files:/a\  - local.rules' /etc/suricata/suricata.yaml || \
-    echo "  - local.rules" | sudo tee -a /etc/suricata/suricata.yaml > /dev/null
+    echo "Adding local.rules to suricata.yaml configuration..."
+    # Ищем секцию rule-files и добавляем туда
+    if grep -q "rule-files:" /etc/suricata/suricata.yaml; then
+      # Добавляем после rule-files:
+      sudo sed -i '/rule-files:/a\  - local.rules' /etc/suricata/suricata.yaml
+    elif grep -q "default-rule-path:" /etc/suricata/suricata.yaml; then
+      # Добавляем после default-rule-path
+      sudo sed -i '/default-rule-path:/a\\nrule-files:\n  - local.rules' /etc/suricata/suricata.yaml
+    else
+      # Добавляем в конец файла
+      echo "" | sudo tee -a /etc/suricata/suricata.yaml
+      echo "rule-files:" | sudo tee -a /etc/suricata/suricata.yaml
+      echo "  - local.rules" | sudo tee -a /etc/suricata/suricata.yaml
+    fi
+    echo "✅ Added local.rules to configuration"
+  else
+    echo "✅ local.rules already in configuration"
   fi
   
   echo "✅ Custom rules loaded"
@@ -70,16 +83,38 @@ else
   echo "⚠️  Warning: Custom rules file not found at ~/rules/suricata-rules.rules"
 fi
 
-# Находим Docker bridge интерфейс для информации
-DOCKER_BRIDGE=$(docker network inspect vulnnet 2>/dev/null | grep -oP '"Name": "\K[^"]+' | head -1 || echo "")
+# Находим Docker bridge интерфейс для мониторинга
+DOCKER_BRIDGE=$(docker network inspect vulnnet 2>/dev/null | jq -r '.[0].Options."com.docker.network.bridge.name" // empty' 2>/dev/null || echo "")
 if [ -z "$DOCKER_BRIDGE" ]; then
-  DOCKER_BRIDGE=$(ip -br link show | grep -E '^br-' | awk '{print $1}' | head -1 || echo "docker0")
+  DOCKER_BRIDGE=$(docker network inspect vulnnet 2>/dev/null | grep -oP '"Name": "\K[^"]+' | head -1 || echo "")
+fi
+if [ -z "$DOCKER_BRIDGE" ]; then
+  DOCKER_BRIDGE=$(ip -br link show | grep -E '^br-' | awk '{print $1}' | head -1 || echo "any")
 fi
 echo "Docker bridge interface: $DOCKER_BRIDGE"
 
+# Настраиваем Suricata для мониторинга всех интерфейсов или Docker bridge
+# Suricata по умолчанию мониторит все интерфейсы через AF_PACKET
+# Но нужно убедиться, что он видит Docker трафик
+if [ "$DOCKER_BRIDGE" != "any" ] && ip link show "$DOCKER_BRIDGE" &>/dev/null; then
+  echo "Docker bridge $DOCKER_BRIDGE found, Suricata should monitor it automatically"
+else
+  echo "Using default interface monitoring (Suricata will monitor all interfaces)"
+fi
+
 # Проверяем конфигурацию Suricata
 echo "Testing Suricata configuration..."
-sudo suricata -T -c /etc/suricata/suricata.yaml || echo "Config test completed"
+if ! sudo suricata -T -c /etc/suricata/suricata.yaml 2>&1; then
+  echo "⚠️  Suricata configuration test failed. Checking errors..."
+  sudo suricata -T -c /etc/suricata/suricata.yaml 2>&1 | tail -20
+  echo "Attempting to fix common issues..."
+  
+  # Убеждаемся, что default-rule-path существует
+  if ! grep -q "default-rule-path:" /etc/suricata/suricata.yaml; then
+    echo "Adding default-rule-path..."
+    sudo sed -i '/rule-files:/i\default-rule-path: /etc/suricata/rules' /etc/suricata/suricata.yaml || true
+  fi
+fi
 
 # Перезапускаем Suricata после создания Docker сети и загрузки правил
 echo "Restarting Suricata..."
@@ -92,11 +127,34 @@ if [ -f /etc/suricata/rules/local.rules ]; then
   echo "Loaded $RULE_COUNT custom rules"
 fi
 
-sudo systemctl start suricata
+# Запускаем Suricata
+echo "Starting Suricata service..."
+sudo systemctl start suricata || {
+  echo "Systemd start failed, checking why..."
+  sudo journalctl -u suricata -n 20 --no-pager
+  echo "Trying to start manually to see errors..."
+  sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D -v 2>&1 | head -30 || true
+}
+
 sleep 5
 
+# Проверяем, запущен ли Suricata
+if ! sudo systemctl is-active --quiet suricata && ! pgrep -x suricata > /dev/null; then
+  echo "⚠️  Suricata is not running. Attempting alternative start method..."
+  # Пробуем запустить в фоне без systemd
+  sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D || {
+    echo "Manual start also failed. Last attempt with minimal config..."
+    # Пробуем запустить только на одном интерфейсе
+    INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+    if [ -n "$INTERFACE" ]; then
+      sudo suricata -c /etc/suricata/suricata.yaml -i "$INTERFACE" -D || echo "Failed to start on $INTERFACE"
+    fi
+  }
+  sleep 3
+fi
+
 # Перезагружаем правила Suricata (если сервис уже запущен)
-if sudo systemctl is-active --quiet suricata; then
+if sudo systemctl is-active --quiet suricata || pgrep -x suricata > /dev/null; then
   echo "Reloading Suricata rules..."
   sudo suricatasc -c "reload-rules" 2>/dev/null || echo "Could not reload rules via suricatasc (this is OK if Suricata was just started)"
 fi
@@ -104,10 +162,21 @@ fi
 # Проверяем статус
 if sudo systemctl is-active --quiet suricata; then
   echo "✅ Suricata is running"
-  sudo systemctl status suricata --no-pager -l || true
+  sudo systemctl status suricata --no-pager -l | head -15 || true
 else
-  echo "⚠️  Warning: Suricata service may not be running"
-  sudo systemctl status suricata --no-pager -l || true
+  echo "⚠️  ERROR: Suricata service failed to start!"
+  echo "Checking error logs:"
+  sudo journalctl -u suricata -n 30 --no-pager || true
+  echo ""
+  echo "Attempting to start Suricata manually to see errors:"
+  sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D 2>&1 | head -20 || true
+  sleep 2
+  if pgrep -x suricata > /dev/null; then
+    echo "✅ Suricata started manually"
+    sudo pkill suricata || true
+    sleep 1
+    sudo systemctl start suricata || true
+  fi
 fi
 
 # Проверяем, что eve.json создается

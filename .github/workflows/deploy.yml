@@ -161,22 +161,58 @@ jobs:
             echo ""
             echo "=== Checking Suricata rules ==="
             if [ -f /etc/suricata/rules/local.rules ]; then
-              echo "Custom rules file exists"
+              echo "✅ Custom rules file exists"
               RULE_COUNT=$(grep -c "^alert" /etc/suricata/rules/local.rules 2>/dev/null || echo "0")
               echo "Custom rules count: $RULE_COUNT"
               echo "Sample rules:"
               grep "^alert" /etc/suricata/rules/local.rules | head -3
+              
+              # Проверяем, что правила включены в конфигурацию
+              if grep -q "local.rules" /etc/suricata/suricata.yaml 2>/dev/null; then
+                echo "✅ Rules are included in suricata.yaml"
+              else
+                echo "⚠️  Rules may not be included in suricata.yaml"
+              fi
             else
-              echo "⚠️  Custom rules file not found!"
+              echo "❌ Custom rules file not found at /etc/suricata/rules/local.rules!"
+              echo "Checking if rules were copied:"
+              ls -la ~/rules/ 2>/dev/null || echo "~/rules/ directory not found"
             fi
             
             echo "=== Executing attacks from attacker container ==="
             docker exec attacker bash /tmp/attack.sh || true
             
             echo ""
+            echo "=== Ensuring Suricata is running and reloading rules ==="
+            # Убеждаемся, что Suricata запущен
+            if ! sudo systemctl is-active --quiet suricata && ! pgrep -x suricata > /dev/null; then
+              echo "Suricata not running, attempting to start..."
+              sudo systemctl start suricata || sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D || true
+              sleep 3
+            fi
+            
+            # Перезагружаем правила, чтобы убедиться, что они активны
+            if pgrep -x suricata > /dev/null; then
+              echo "Reloading Suricata rules..."
+              sudo suricatasc -c "reload-rules" 2>/dev/null || echo "Could not reload via suricatasc"
+            fi
+            
+            echo ""
             echo "=== Waiting for Suricata to process events ==="
             sleep 10
             
+            echo ""
+            echo "=== Checking Suricata status ==="
+            if sudo systemctl is-active --quiet suricata || pgrep -x suricata > /dev/null; then
+              echo "✅ Suricata is running"
+              ps aux | grep suricata | grep -v grep | head -2
+            else
+              echo "❌ Suricata is NOT running!"
+              echo "Checking why it failed:"
+              sudo journalctl -u suricata -n 30 --no-pager | tail -20 || true
+            fi
+            
+            echo ""
             echo "=== Checking Suricata can see Docker network ==="
             # Проверяем, видит ли Suricata трафик внутри Docker сети
             if [ -f /var/log/suricata/eve.json ]; then
@@ -184,13 +220,15 @@ jobs:
               echo "Events involving Docker network (172.20.0.0/16): $DOCKER_TRAFFIC"
               if [ "$DOCKER_TRAFFIC" -eq "0" ]; then
                 echo "⚠️  WARNING: Suricata may not be seeing Docker network traffic!"
-                echo "This could mean Suricata is not monitoring the Docker bridge interface."
+                echo "Docker network interfaces:"
+                ip link show | grep -E "^[0-9]+: (br-|docker|veth)" | head -5 || echo "No Docker interfaces found"
+                echo "Suricata may need to be configured to monitor Docker bridge interface"
+              else
+                echo "✅ Suricata is seeing Docker network traffic"
               fi
+            else
+              echo "⚠️  eve.json not found - Suricata may not be running or logging"
             fi
-            
-            echo ""
-            echo "=== Checking Suricata status ==="
-            sudo systemctl status suricata --no-pager -l | head -20 || true
             
             echo ""
             echo "=== Checking if Suricata sees Docker network traffic ==="
