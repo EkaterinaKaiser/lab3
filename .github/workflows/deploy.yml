@@ -154,21 +154,62 @@ jobs:
             echo "=== Waiting for services to be ready ==="
             sleep 10
             
+            echo "=== Checking container network connectivity ==="
+            docker exec attacker ping -c 2 172.20.0.20 > /dev/null 2>&1 && echo "✅ Can reach PostgreSQL (172.20.0.20)" || echo "❌ Cannot reach PostgreSQL"
+            docker exec attacker ping -c 2 172.20.0.31 > /dev/null 2>&1 && echo "✅ Can reach Kafka (172.20.0.31)" || echo "❌ Cannot reach Kafka"
+            
+            echo ""
+            echo "=== Checking Suricata rules ==="
+            if [ -f /etc/suricata/rules/local.rules ]; then
+              echo "Custom rules file exists"
+              RULE_COUNT=$(grep -c "^alert" /etc/suricata/rules/local.rules 2>/dev/null || echo "0")
+              echo "Custom rules count: $RULE_COUNT"
+              echo "Sample rules:"
+              grep "^alert" /etc/suricata/rules/local.rules | head -3
+            else
+              echo "⚠️  Custom rules file not found!"
+            fi
+            
             echo "=== Executing attacks from attacker container ==="
             docker exec attacker bash /tmp/attack.sh || true
             
             echo ""
             echo "=== Waiting for Suricata to process events ==="
-            sleep 5
+            sleep 10
+            
+            echo "=== Checking Suricata can see Docker network ==="
+            # Проверяем, видит ли Suricata трафик внутри Docker сети
+            if [ -f /var/log/suricata/eve.json ]; then
+              DOCKER_TRAFFIC=$(sudo jq -r 'select(.src_ip | startswith("172.20.0.") or .dest_ip | startswith("172.20.0."))' /var/log/suricata/eve.json 2>/dev/null | wc -l || echo "0")
+              echo "Events involving Docker network (172.20.0.0/16): $DOCKER_TRAFFIC"
+              if [ "$DOCKER_TRAFFIC" -eq "0" ]; then
+                echo "⚠️  WARNING: Suricata may not be seeing Docker network traffic!"
+                echo "This could mean Suricata is not monitoring the Docker bridge interface."
+              fi
+            fi
+            
+            echo ""
+            echo "=== Checking Suricata status ==="
+            sudo systemctl status suricata --no-pager -l | head -20 || true
+            
+            echo ""
+            echo "=== Checking if Suricata sees Docker network traffic ==="
+            if [ -f /var/log/suricata/eve.json ]; then
+              echo "Recent connections to victim services:"
+              sudo tail -n 100 /var/log/suricata/eve.json | jq -r 'select(.dest_ip=="172.20.0.20" or .dest_ip=="172.20.0.31") | "\(.timestamp) | \(.event_type) | Src: \(.src_ip):\(.src_port) -> Dst: \(.dest_ip):\(.dest_port)"' 2>/dev/null | head -20 || echo "No connections to victim services found"
+            fi
             
             echo ""
             echo "=== Suricata Alert Log (showing detected attacks) ==="
             if [ -f /var/log/suricata/eve.json ]; then
               # Показываем последние алерты из eve.json
-              sudo tail -n 50 /var/log/suricata/eve.json | jq -r 'select(.event_type=="alert") | "\(.timestamp) | \(.alert.signature) | Src: \(.src_ip):\(.src_port) -> Dst: \(.dest_ip):\(.dest_port)"' 2>/dev/null || \
-              sudo tail -n 50 /var/log/suricata/eve.json | grep -i "alert\|attack\|exploit" || \
-              echo "No alerts found in eve.json format, showing raw log:"
-              sudo tail -n 50 /var/log/suricata/eve.json
+              ALERTS=$(sudo tail -n 200 /var/log/suricata/eve.json | jq -r 'select(.event_type=="alert")' 2>/dev/null)
+              if [ -n "$ALERTS" ]; then
+                echo "$ALERTS" | jq -r '"\(.timestamp) | \(.alert.signature) | Src: \(.src_ip):\(.src_port) -> Dst: \(.dest_ip):\(.dest_port) | Category: \(.alert.category)"' | head -30
+              else
+                echo "No alerts found in recent logs. Checking all alerts..."
+                sudo jq -r 'select(.event_type=="alert") | "\(.timestamp) | \(.alert.signature) | Src: \(.src_ip):\(.src_port) -> Dst: \(.dest_ip):\(.dest_port)"' /var/log/suricata/eve.json 2>/dev/null | tail -30 || echo "Could not parse alerts"
+              fi
             else
               echo "⚠️  eve.json file not found, checking Suricata logs..."
               sudo journalctl -u suricata -n 50 --no-pager || true
@@ -188,7 +229,19 @@ jobs:
               
               echo ""
               echo "Attack types detected:"
-              sudo jq -r 'select(.event_type=="alert") | .alert.signature' /var/log/suricata/eve.json 2>/dev/null | sort | uniq -c | sort -rn || echo "Could not parse attack types"
+              sudo jq -r 'select(.event_type=="alert") | .alert.signature' /var/log/suricata/eve.json 2>/dev/null | sort | uniq -c | sort -rn | head -20 || echo "Could not parse attack types"
+              
+              echo ""
+              echo "Alerts related to PostgreSQL (172.20.0.20:5432):"
+              sudo jq -r 'select(.event_type=="alert" and .dest_ip=="172.20.0.20" and .dest_port==5432) | "\(.alert.signature)"' /var/log/suricata/eve.json 2>/dev/null | sort | uniq -c || echo "No PostgreSQL alerts found"
+              
+              echo ""
+              echo "Alerts related to Kafka (172.20.0.31:9092):"
+              sudo jq -r 'select(.event_type=="alert" and .dest_ip=="172.20.0.31" and .dest_port==9092) | "\(.alert.signature)"' /var/log/suricata/eve.json 2>/dev/null | sort | uniq -c || echo "No Kafka alerts found"
+              
+              echo ""
+              echo "Alerts from attacker container (172.20.0.10):"
+              sudo jq -r 'select(.event_type=="alert" and .src_ip=="172.20.0.10") | "\(.alert.signature) -> \(.dest_ip):\(.dest_port)"' /var/log/suricata/eve.json 2>/dev/null | sort | uniq -c || echo "No alerts from attacker found"
             else
               echo "⚠️  Could not generate summary (eve.json not found)"
             fi

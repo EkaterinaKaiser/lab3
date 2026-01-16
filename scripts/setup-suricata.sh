@@ -81,12 +81,25 @@ echo "Docker bridge interface: $DOCKER_BRIDGE"
 echo "Testing Suricata configuration..."
 sudo suricata -T -c /etc/suricata/suricata.yaml || echo "Config test completed"
 
-# Перезапускаем Suricata после создания Docker сети
+# Перезапускаем Suricata после создания Docker сети и загрузки правил
 echo "Restarting Suricata..."
 sudo systemctl stop suricata 2>/dev/null || true
 sleep 2
+
+# Проверяем, что правила загружены
+if [ -f /etc/suricata/rules/local.rules ]; then
+  RULE_COUNT=$(grep -c "^alert" /etc/suricata/rules/local.rules 2>/dev/null || echo "0")
+  echo "Loaded $RULE_COUNT custom rules"
+fi
+
 sudo systemctl start suricata
-sleep 3
+sleep 5
+
+# Перезагружаем правила Suricata (если сервис уже запущен)
+if sudo systemctl is-active --quiet suricata; then
+  echo "Reloading Suricata rules..."
+  sudo suricatasc -c "reload-rules" 2>/dev/null || echo "Could not reload rules via suricatasc (this is OK if Suricata was just started)"
+fi
 
 # Проверяем статус
 if sudo systemctl is-active --quiet suricata; then
