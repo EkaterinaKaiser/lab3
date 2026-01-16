@@ -335,6 +335,7 @@ jobs:
             if [ -n "$DOCKER_BRIDGE" ] && ip link show "$DOCKER_BRIDGE" &>/dev/null; then
               echo "Found Docker bridge: $DOCKER_BRIDGE"
               # Проверяем, что интерфейс в конфигурации Suricata
+              NEED_RESTART=false
               if ! grep -A 20 "^af-packet:" /etc/suricata/suricata.yaml | grep -q "interface: $DOCKER_BRIDGE"; then
                 echo "⚠️  Docker bridge $DOCKER_BRIDGE not in Suricata config, adding it..."
                 # Создаем временный файл с конфигурацией интерфейса используя printf
@@ -342,14 +343,29 @@ jobs:
                 # Вставляем после строки af-packet:
                 sudo sed -i '/^af-packet:/r /tmp/suricata_bridge_config.txt' /etc/suricata/suricata.yaml
                 sudo rm -f /tmp/suricata_bridge_config.txt
-                echo "Restarting Suricata to apply new interface..."
-                sudo systemctl stop suricata 2>/dev/null || true
-                sudo pkill -9 suricata 2>/dev/null || true
-                sleep 2
-                sudo systemctl start suricata || sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D || true
-                sleep 3
+                NEED_RESTART=true
               else
                 echo "✅ Docker bridge $DOCKER_BRIDGE is in Suricata configuration"
+                # Все равно перезапускаем, чтобы убедиться, что Suricata видит интерфейс
+                NEED_RESTART=true
+              fi
+              
+              if [ "$NEED_RESTART" = "true" ]; then
+                echo "Restarting Suricata to ensure Docker network monitoring..."
+                sudo systemctl stop suricata 2>/dev/null || true
+                sudo pkill -9 suricata 2>/dev/null || true
+                sleep 3
+                # Проверяем конфигурацию перед запуском
+                sudo suricata -T -c /etc/suricata/suricata.yaml 2>&1 | tail -5 || true
+                sudo systemctl start suricata || sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D || true
+                sleep 5
+                if pgrep -x suricata > /dev/null; then
+                  echo "✅ Suricata restarted successfully"
+                  # Проверяем, какие интерфейсы Suricata видит
+                  sudo suricatasc -c "iface-list" 2>/dev/null || echo "Could not list interfaces"
+                else
+                  echo "⚠️  Suricata restart failed"
+                fi
               fi
             else
               echo "⚠️  Docker bridge not found"
