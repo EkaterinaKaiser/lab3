@@ -43,9 +43,24 @@ sudo sed -i '/eve-log:/,/^[^[:space:]#]/ {
 }' /etc/suricata/suricata.yaml || true
 
 # Убеждаемся, что eve.json файл существует и имеет правильные права
+# Проверяем, не является ли eve.json директорией (ошибка из предыдущих установок)
+if [ -d /var/log/suricata/eve.json ]; then
+  echo "⚠️  WARNING: /var/log/suricata/eve.json is a directory! Removing it..."
+  sudo rm -rf /var/log/suricata/eve.json
+fi
+
+# Создаем файл eve.json
 sudo touch /var/log/suricata/eve.json
 sudo chown suricata:suricata /var/log/suricata/eve.json
 sudo chmod 644 /var/log/suricata/eve.json
+
+# Проверяем, что это действительно файл
+if [ -f /var/log/suricata/eve.json ]; then
+  echo "✅ eve.json file created successfully"
+else
+  echo "❌ ERROR: Failed to create eve.json file"
+  ls -la /var/log/suricata/ | grep eve
+fi
 
 # Загружаем кастомные правила защиты
 echo "Loading custom Suricata rules..."
@@ -283,13 +298,25 @@ else
   fi
 fi
 
-# Проверяем, что eve.json создается
+# Проверяем, что eve.json создается и является файлом (не директорией)
 sleep 2
 if [ -f /var/log/suricata/eve.json ]; then
-  echo "✅ Suricata eve.json file exists"
+  echo "✅ Suricata eve.json file exists and is a file"
   ls -lh /var/log/suricata/eve.json
+elif [ -d /var/log/suricata/eve.json ]; then
+  echo "❌ ERROR: eve.json is still a directory! Removing and recreating..."
+  sudo rm -rf /var/log/suricata/eve.json
+  sudo touch /var/log/suricata/eve.json
+  sudo chown suricata:suricata /var/log/suricata/eve.json
+  sudo chmod 644 /var/log/suricata/eve.json
+  echo "✅ eve.json recreated as file"
 else
   echo "⚠️  Warning: eve.json file not found yet (will be created when Suricata processes traffic)"
+  # Создаем файл заранее
+  sudo touch /var/log/suricata/eve.json
+  sudo chown suricata:suricata /var/log/suricata/eve.json
+  sudo chmod 644 /var/log/suricata/eve.json
+  echo "✅ Created eve.json file"
 fi
 
 echo "=== Suricata setup completed ==="

@@ -84,7 +84,13 @@ jobs:
             # Очищаем логи Suricata
             if [ -d /var/log/suricata ]; then
               echo "Cleaning Suricata logs..."
+              # Удаляем все содержимое, включая директории
               sudo rm -rf /var/log/suricata/* || true
+              # Особенно важно удалить eve.json, если это директория
+              if [ -d /var/log/suricata/eve.json ]; then
+                echo "Removing eve.json directory (should be a file)..."
+                sudo rm -rf /var/log/suricata/eve.json || true
+              fi
               sudo mkdir -p /var/log/suricata || true
             fi
             
