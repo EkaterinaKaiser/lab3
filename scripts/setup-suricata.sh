@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# Функция для обработки ошибок
+handle_error() {
+  echo "❌ Error occurred at line $1"
+  exit 1
+}
+trap 'handle_error $LINENO' ERR
+
 echo "=== Setting up Suricata ==="
 
 # Установка Suricata (если не установлен)
@@ -190,12 +197,34 @@ fi
 
 # Проверяем конфигурацию Suricata
 echo "Testing Suricata configuration..."
+set +e  # Временно отключаем set -e для обработки ошибок теста
 CONFIG_TEST=$(sudo suricata -T -c /etc/suricata/suricata.yaml 2>&1)
+CONFIG_EXIT_CODE=$?
+set -e  # Включаем обратно
+
 if echo "$CONFIG_TEST" | grep -q "Configuration test was successful"; then
   echo "✅ Suricata configuration is valid"
-else
-  echo "⚠️  Suricata configuration test issues:"
-  echo "$CONFIG_TEST" | tail -30
+elif [ $CONFIG_EXIT_CODE -ne 0 ]; then
+  echo "⚠️  Suricata configuration test failed with exit code $CONFIG_EXIT_CODE"
+  echo "Full error output:"
+  echo "$CONFIG_TEST" | tail -50
+  
+  # Ищем конкретные ошибки
+  if echo "$CONFIG_TEST" | grep -q "eve.json.*Is a directory"; then
+    echo "Fixing eve.json directory issue..."
+    sudo rm -rf /var/log/suricata/eve.json
+    sudo touch /var/log/suricata/eve.json
+    sudo chown suricata:suricata /var/log/suricata/eve.json
+    sudo chmod 644 /var/log/suricata/eve.json
+    echo "Retesting configuration..."
+    sudo suricata -T -c /etc/suricata/suricata.yaml 2>&1 | tail -20 || true
+  fi
+  
+  if echo "$CONFIG_TEST" | grep -q "No interface found"; then
+    echo "⚠️  Interface configuration issue detected"
+    echo "Current af-packet configuration:"
+    grep -A 10 "^af-packet:" /etc/suricata/suricata.yaml || echo "No af-packet section found"
+  fi
   
   # Убеждаемся, что default-rule-path существует
   if ! grep -q "default-rule-path:" /etc/suricata/suricata.yaml; then
@@ -207,12 +236,20 @@ else
   if ! grep -A 5 "^af-packet:" /etc/suricata/suricata.yaml | grep -q "interface:"; then
     echo "⚠️  No interfaces configured in af-packet section"
   fi
+  
+  echo "⚠️  Continuing despite configuration test failure - will attempt to start Suricata anyway"
+else
+  echo "⚠️  Configuration test completed with warnings"
+  echo "$CONFIG_TEST" | grep -i "warning\|error" | tail -20 || echo "No critical errors found"
 fi
 
 # Перезапускаем Suricata после создания Docker сети и загрузки правил
-echo "Restarting Suricata..."
+echo "Preparing to start Suricata..."
+set +e  # Отключаем строгую проверку ошибок для операций, которые могут завершиться с ошибкой
 sudo systemctl stop suricata 2>/dev/null || true
+sudo pkill -9 suricata 2>/dev/null || true
 sleep 2
+set -e  # Включаем обратно
 
 # Проверяем, что правила загружены
 if [ -f /etc/suricata/rules/local.rules ]; then
@@ -222,44 +259,61 @@ fi
 
 # Запускаем Suricata
 echo "Starting Suricata service..."
-# Сначала останавливаем, если запущен
-sudo systemctl stop suricata 2>/dev/null || true
-sudo pkill -9 suricata 2>/dev/null || true
-sleep 2
+set +e  # Отключаем строгую проверку для операций запуска
 
 # Пробуем запустить через systemd
 if sudo systemctl start suricata 2>&1; then
-  echo "Suricata started via systemd"
+  echo "✅ Suricata started via systemd"
+  sleep 3
 else
-  echo "Systemd start failed, checking errors..."
+  echo "⚠️  Systemd start failed, checking errors..."
   sudo journalctl -u suricata -n 30 --no-pager | grep -i "error\|fail" | tail -10 || true
   
   echo "Trying to start manually to see detailed errors..."
   # Пробуем запустить вручную с выводом ошибок
-  sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D -v 2>&1 | head -50 || {
-    echo "Manual start also failed. Trying with specific interface..."
+  MANUAL_START_OUTPUT=$(sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D -v 2>&1)
+  if echo "$MANUAL_START_OUTPUT" | grep -q "started"; then
+    echo "✅ Suricata started manually"
+  else
+    echo "Manual start output:"
+    echo "$MANUAL_START_OUTPUT" | head -50
+    echo ""
+    echo "Trying with specific interface..."
     if [ -n "$ACTIVE_INTERFACE" ] && [ "$ACTIVE_INTERFACE" != "any" ]; then
-      sudo suricata -c /etc/suricata/suricata.yaml -i "$ACTIVE_INTERFACE" -D -v 2>&1 | head -30 || echo "Failed to start on $ACTIVE_INTERFACE"
+      INTERFACE_START_OUTPUT=$(sudo suricata -c /etc/suricata/suricata.yaml -i "$ACTIVE_INTERFACE" -D -v 2>&1)
+      if echo "$INTERFACE_START_OUTPUT" | grep -q "started"; then
+        echo "✅ Suricata started on interface $ACTIVE_INTERFACE"
+      else
+        echo "⚠️  Failed to start on $ACTIVE_INTERFACE"
+        echo "$INTERFACE_START_OUTPUT" | head -30
+      fi
     fi
-  }
+  fi
 fi
+set -e  # Включаем обратно
 
 sleep 5
 
 # Проверяем, запущен ли Suricata
+set +e
 if ! sudo systemctl is-active --quiet suricata && ! pgrep -x suricata > /dev/null; then
   echo "⚠️  Suricata is not running. Attempting alternative start method..."
   # Пробуем запустить в фоне без systemd
-  sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D || {
+  ALT_START_OUTPUT=$(sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D 2>&1)
+  if echo "$ALT_START_OUTPUT" | grep -q "started\|error"; then
+    echo "$ALT_START_OUTPUT" | head -20
+  else
     echo "Manual start also failed. Last attempt with minimal config..."
     # Пробуем запустить только на одном интерфейсе
     INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
     if [ -n "$INTERFACE" ]; then
-      sudo suricata -c /etc/suricata/suricata.yaml -i "$INTERFACE" -D || echo "Failed to start on $INTERFACE"
+      INTERFACE_START=$(sudo suricata -c /etc/suricata/suricata.yaml -i "$INTERFACE" -D 2>&1)
+      echo "$INTERFACE_START" | head -20 || echo "Failed to start on $INTERFACE"
     fi
-  }
+  fi
   sleep 3
 fi
+set -e
 
 # Перезагружаем правила Suricata (если сервис уже запущен)
 if sudo systemctl is-active --quiet suricata || pgrep -x suricata > /dev/null; then
@@ -268,6 +322,7 @@ if sudo systemctl is-active --quiet suricata || pgrep -x suricata > /dev/null; t
 fi
 
 # Проверяем статус
+set +e
 if sudo systemctl is-active --quiet suricata || pgrep -x suricata > /dev/null; then
   echo "✅ Suricata is running"
   if sudo systemctl is-active --quiet suricata; then
@@ -277,15 +332,16 @@ if sudo systemctl is-active --quiet suricata || pgrep -x suricata > /dev/null; t
     ps aux | grep suricata | grep -v grep | head -2
   fi
 else
-  echo "⚠️  ERROR: Suricata service failed to start!"
+  echo "⚠️  WARNING: Suricata service is not running!"
   echo "Checking error logs:"
-  sudo journalctl -u suricata -n 30 --no-pager | grep -i "error\|fail\|interface" | tail -15 || true
+  sudo journalctl -u suricata -n 30 --no-pager 2>/dev/null | grep -i "error\|fail\|interface" | tail -15 || echo "No recent errors in journal"
   echo ""
   echo "Available network interfaces:"
   ip -br link show | grep -v "lo" | head -5
   echo ""
-  echo "Attempting to start Suricata manually to see errors:"
-  sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D -v 2>&1 | head -30 || true
+  echo "Attempting final start attempt:"
+  FINAL_START=$(sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D -v 2>&1)
+  echo "$FINAL_START" | head -30
   sleep 3
   if pgrep -x suricata > /dev/null; then
     echo "✅ Suricata started manually"
@@ -294,9 +350,11 @@ else
     sleep 2
     sudo systemctl start suricata || true
   else
-    echo "❌ Could not start Suricata. Please check configuration manually."
+    echo "⚠️  Could not start Suricata automatically. Manual intervention may be required."
+    echo "You can try starting manually with: sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D"
   fi
 fi
+set -e
 
 # Проверяем, что eve.json создается и является файлом (не директорией)
 sleep 2
@@ -318,5 +376,14 @@ else
   sudo chmod 644 /var/log/suricata/eve.json
   echo "✅ Created eve.json file"
 fi
+
+# Финальная проверка статуса
+set +e
+if sudo systemctl is-active --quiet suricata || pgrep -x suricata > /dev/null; then
+  echo "✅ Suricata is running"
+else
+  echo "⚠️  Suricata is not running, but setup completed"
+fi
+set -e
 
 echo "=== Suricata setup completed ==="
