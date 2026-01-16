@@ -1,0 +1,81 @@
+services:
+  attacker:
+    image: kalilinux/kali-rolling:latest
+    container_name: attacker
+    hostname: attacker
+    networks:
+      vulnnet:
+        ipv4_address: 172.20.0.10
+    stdin_open: true 
+    tty: true 
+    command: /bin/bash
+
+  victim-postgreSQL:
+    image: postgres:15-alpine
+    container_name: victim-postgreSQL
+    hostname: victim-postgreSQL
+    networks:
+      vulnnet:
+        ipv4_address: 172.20.0.20
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: victimdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    hostname: zookeeper
+    networks:
+      vulnnet:
+        ipv4_address: 172.20.0.30
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  victim-kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: victim-kafka
+    hostname: victim-kafka
+    networks:
+      vulnnet:
+        ipv4_address: 172.20.0.31
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://victim-kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+
+  evebox:
+    image: jasonish/evebox:latest
+    container_name: evebox
+    hostname: evebox
+    networks:
+      vulnnet:
+        ipv4_address: 172.20.0.200
+    ports:
+      - "5636:5636"
+    volumes:
+      - /var/log/suricata/eve.json:/var/log/suricata/eve.json:ro
+    command: -e /var/log/suricata/eve.json
+
+networks:
+  vulnnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:

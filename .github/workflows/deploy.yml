@@ -1,0 +1,84 @@
+name: Deploy Containers to Cloud
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  DOCKER_COMPOSE_VERSION: 2.24.0
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install Docker Compose
+        run: docker-compose --version
+
+      - name: Clean up existing containers
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~
+            docker-compose down -v --remove-orphans || true
+            docker container prune -f || true
+            docker image prune -a -f || true
+            docker volume prune -f || true
+            docker network prune -f || true
+            docker system prune -a -f --volumes || true
+
+      - name: Copy project files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.yml,scripts/"
+          target: "~"
+
+      - name: Deploy to remote server via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~
+            docker-compose pull
+            docker-compose up -d
+            docker-compose ps
+
+      - name: Setup Suricata
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            chmod +x ~/scripts/setup-suricata.sh
+            bash ~/scripts/setup-suricata.sh
+
+      - name: Install tools on attacker container
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            docker exec attacker bash -c "apt update && apt install -y vim nmap jq metasploit-framework netcat-traditional telnet smbclient redis-tools python3-pip python3-venv curl wget python3 awscli openssh-client hydra python2.7 python2.7-dev git gcc file openjdk-11-jre"
+
+      - name: Deployment status
+        run: |
+          echo "Deployment completed successfully!"
