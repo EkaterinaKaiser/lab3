@@ -33,6 +33,95 @@ jobs:
           source: "docker-compose.yml,scripts/,rules/"
           target: "~"
 
+      - name: Clean up Suricata completely
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "=== Stopping all Suricata processes ==="
+            # Останавливаем Suricata через systemd
+            sudo systemctl stop suricata 2>/dev/null || true
+            sudo systemctl disable suricata 2>/dev/null || true
+            
+            # Убиваем все процессы Suricata
+            sudo pkill -9 suricata 2>/dev/null || true
+            sudo pkill -9 suricatasc 2>/dev/null || true
+            sleep 2
+            
+            # Проверяем, что процессы остановлены
+            if pgrep -x suricata > /dev/null; then
+              echo "⚠️  Some Suricata processes still running, force killing..."
+              sudo killall -9 suricata 2>/dev/null || true
+              sleep 1
+            fi
+            
+            echo "=== Removing Suricata service ==="
+            # Удаляем unit файл systemd (если существует)
+            if [ -f /etc/systemd/system/suricata.service ]; then
+              sudo systemctl daemon-reload || true
+            fi
+            
+            echo "=== Removing Suricata configuration ==="
+            # Удаляем конфигурацию Suricata
+            if [ -f /etc/suricata/suricata.yaml ]; then
+              echo "Backing up suricata.yaml before removal..."
+              sudo cp /etc/suricata/suricata.yaml /etc/suricata/suricata.yaml.backup.$(date +%s) 2>/dev/null || true
+            fi
+            
+            echo "=== Removing Suricata rules ==="
+            # Удаляем пользовательские правила
+            if [ -f /etc/suricata/rules/local.rules ]; then
+              echo "Removing local.rules..."
+              sudo rm -f /etc/suricata/rules/local.rules || true
+            fi
+            
+            # Удаляем все пользовательские правила в директории
+            sudo rm -f /etc/suricata/rules/*.rules 2>/dev/null || true
+            
+            echo "=== Removing Suricata logs ==="
+            # Очищаем логи Suricata
+            if [ -d /var/log/suricata ]; then
+              echo "Cleaning Suricata logs..."
+              sudo rm -rf /var/log/suricata/* || true
+              sudo mkdir -p /var/log/suricata || true
+            fi
+            
+            echo "=== Removing Suricata runtime files ==="
+            # Удаляем runtime файлы
+            sudo rm -rf /var/run/suricata* 2>/dev/null || true
+            sudo rm -rf /var/lib/suricata 2>/dev/null || true
+            sudo rm -rf /tmp/suricata* 2>/dev/null || true
+            
+            echo "=== Uninstalling Suricata (optional) ==="
+            # Опционально: удаляем пакет Suricata (но не делаем это, так как потом нужно будет установить заново)
+            # sudo apt-get remove --purge -y suricata suricata-update 2>/dev/null || true
+            # sudo apt-get autoremove -y 2>/dev/null || true
+            
+            echo "=== Cleaning up Suricata update cache ==="
+            # Очищаем кэш обновлений правил
+            sudo rm -rf /var/lib/suricata-update 2>/dev/null || true
+            sudo rm -rf /var/cache/suricata 2>/dev/null || true
+            
+            echo "=== Verifying Suricata cleanup ==="
+            # Проверяем, что все процессы остановлены
+            if pgrep -x suricata > /dev/null; then
+              echo "❌ ERROR: Suricata processes still running!"
+              ps aux | grep suricata | grep -v grep
+            else
+              echo "✅ All Suricata processes stopped"
+            fi
+            
+            # Проверяем статус systemd
+            if sudo systemctl is-active --quiet suricata 2>/dev/null; then
+              echo "⚠️  WARNING: Suricata service still active"
+            else
+              echo "✅ Suricata service stopped"
+            fi
+            
+            echo "=== Suricata cleanup completed ==="
+
       - name: Clean up existing containers and networks
         uses: appleboy/ssh-action@v1.0.0
         with:
@@ -152,11 +241,20 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             echo "=== Waiting for services to be ready ==="
-            sleep 10
+            sleep 15
             
+            echo "=== Checking container status ==="
+            docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "attacker|victim|zookeeper|kafka" || docker ps
+            
+            echo ""
             echo "=== Checking container network connectivity ==="
-            docker exec attacker ping -c 2 172.20.0.20 > /dev/null 2>&1 && echo "✅ Can reach PostgreSQL (172.20.0.20)" || echo "❌ Cannot reach PostgreSQL"
-            docker exec attacker ping -c 2 172.20.0.31 > /dev/null 2>&1 && echo "✅ Can reach Kafka (172.20.0.31)" || echo "❌ Cannot reach Kafka"
+            # Проверяем доступность через TCP порты, а не ping (ping может быть заблокирован)
+            docker exec attacker timeout 2 bash -c "echo > /dev/tcp/172.20.0.20/5432" 2>/dev/null && echo "✅ Can reach PostgreSQL (172.20.0.20:5432)" || echo "❌ Cannot reach PostgreSQL on port 5432"
+            docker exec attacker timeout 2 bash -c "echo > /dev/tcp/172.20.0.31/29092" 2>/dev/null && echo "✅ Can reach Kafka (172.20.0.31:29092)" || echo "❌ Cannot reach Kafka on port 29092"
+            
+            echo ""
+            echo "=== Checking network configuration ==="
+            docker network inspect vulnnet --format '{{range .Containers}}{{.Name}}: {{.IPv4Address}}{{"\n"}}{{end}}' 2>/dev/null || echo "Could not inspect network"
             
             echo ""
             echo "=== Checking Suricata rules ==="
@@ -274,8 +372,8 @@ jobs:
               sudo jq -r 'select(.event_type=="alert" and .dest_ip=="172.20.0.20" and .dest_port==5432) | "\(.alert.signature)"' /var/log/suricata/eve.json 2>/dev/null | sort | uniq -c || echo "No PostgreSQL alerts found"
               
               echo ""
-              echo "Alerts related to Kafka (172.20.0.31:9092):"
-              sudo jq -r 'select(.event_type=="alert" and .dest_ip=="172.20.0.31" and .dest_port==9092) | "\(.alert.signature)"' /var/log/suricata/eve.json 2>/dev/null | sort | uniq -c || echo "No Kafka alerts found"
+              echo "Alerts related to Kafka (172.20.0.31:29092 or 9092):"
+              sudo jq -r 'select(.event_type=="alert" and .dest_ip=="172.20.0.31" and (.dest_port==9092 or .dest_port==29092)) | "\(.alert.signature) on port \(.dest_port)"' /var/log/suricata/eve.json 2>/dev/null | sort | uniq -c || echo "No Kafka alerts found"
               
               echo ""
               echo "Alerts from attacker container (172.20.0.10):"
