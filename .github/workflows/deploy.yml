@@ -30,7 +30,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.yml,scripts/"
+          source: "docker-compose.yml,scripts/,rules/"
           target: "~"
 
       - name: Clean up existing containers and networks
@@ -137,8 +137,63 @@ jobs:
               counter=$((counter + 2))
             done
             echo "Attacker container is running, installing tools..."
-            docker exec attacker bash -c "apt update && apt install -y vim nmap jq metasploit-framework netcat-traditional telnet smbclient redis-tools python3-pip python3-venv curl wget python3 awscli openssh-client hydra python2.7 python2.7-dev git gcc file openjdk-11-jre"
+            docker exec attacker bash -c "apt update && apt install -y vim nmap jq metasploit-framework netcat-traditional telnet smbclient redis-tools python3-pip python3-venv curl wget python3 awscli openssh-client hydra python2.7 python2.7-dev git gcc file openjdk-11-jre postgresql-client"
+            
+            # Копируем скрипт атаки в контейнер attacker
+            echo "Copying attack script to attacker container..."
+            docker cp ~/scripts/attack.sh attacker:/tmp/attack.sh || true
+            docker exec attacker chmod +x /tmp/attack.sh || true
+
+      - name: Execute attacks and show Suricata logs
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "=== Waiting for services to be ready ==="
+            sleep 10
+            
+            echo "=== Executing attacks from attacker container ==="
+            docker exec attacker bash /tmp/attack.sh || true
+            
+            echo ""
+            echo "=== Waiting for Suricata to process events ==="
+            sleep 5
+            
+            echo ""
+            echo "=== Suricata Alert Log (showing detected attacks) ==="
+            if [ -f /var/log/suricata/eve.json ]; then
+              # Показываем последние алерты из eve.json
+              sudo tail -n 50 /var/log/suricata/eve.json | jq -r 'select(.event_type=="alert") | "\(.timestamp) | \(.alert.signature) | Src: \(.src_ip):\(.src_port) -> Dst: \(.dest_ip):\(.dest_port)"' 2>/dev/null || \
+              sudo tail -n 50 /var/log/suricata/eve.json | grep -i "alert\|attack\|exploit" || \
+              echo "No alerts found in eve.json format, showing raw log:"
+              sudo tail -n 50 /var/log/suricata/eve.json
+            else
+              echo "⚠️  eve.json file not found, checking Suricata logs..."
+              sudo journalctl -u suricata -n 50 --no-pager || true
+            fi
+            
+            echo ""
+            echo "=== Suricata Fast Log (if available) ==="
+            if [ -f /var/log/suricata/fast.log ]; then
+              sudo tail -n 30 /var/log/suricata/fast.log || true
+            fi
+            
+            echo ""
+            echo "=== Summary of detected attacks ==="
+            if [ -f /var/log/suricata/eve.json ]; then
+              ALERT_COUNT=$(sudo jq -r 'select(.event_type=="alert")' /var/log/suricata/eve.json 2>/dev/null | wc -l || echo "0")
+              echo "Total alerts detected: $ALERT_COUNT"
+              
+              echo ""
+              echo "Attack types detected:"
+              sudo jq -r 'select(.event_type=="alert") | .alert.signature' /var/log/suricata/eve.json 2>/dev/null | sort | uniq -c | sort -rn || echo "Could not parse attack types"
+            else
+              echo "⚠️  Could not generate summary (eve.json not found)"
+            fi
 
       - name: Deployment status
         run: |
           echo "Deployment completed successfully!"
+          echo "Check the logs above to see attacks and Suricata protection in action."

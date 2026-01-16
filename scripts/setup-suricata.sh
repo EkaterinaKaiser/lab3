@@ -47,6 +47,29 @@ sudo touch /var/log/suricata/eve.json
 sudo chown suricata:suricata /var/log/suricata/eve.json
 sudo chmod 644 /var/log/suricata/eve.json
 
+# Загружаем кастомные правила защиты
+echo "Loading custom Suricata rules..."
+if [ -f ~/rules/suricata-rules.rules ]; then
+  sudo mkdir -p /etc/suricata/rules
+  sudo cp ~/rules/suricata-rules.rules /etc/suricata/rules/local.rules
+  sudo chown suricata:suricata /etc/suricata/rules/local.rules
+  sudo chmod 644 /etc/suricata/rules/local.rules
+  
+  # Убеждаемся, что локальные правила включены в конфигурации
+  if ! grep -q "local.rules" /etc/suricata/suricata.yaml 2>/dev/null; then
+    # Добавляем правило-файл в конфигурацию
+    sudo sed -i '/default-rule-path:/a\  - local.rules' /etc/suricata/suricata.yaml || \
+    sudo sed -i '/rule-files:/a\  - local.rules' /etc/suricata/suricata.yaml || \
+    echo "  - local.rules" | sudo tee -a /etc/suricata/suricata.yaml > /dev/null
+  fi
+  
+  echo "✅ Custom rules loaded"
+  echo "Rules file location: /etc/suricata/rules/local.rules"
+  sudo cat /etc/suricata/rules/local.rules | head -5
+else
+  echo "⚠️  Warning: Custom rules file not found at ~/rules/suricata-rules.rules"
+fi
+
 # Находим Docker bridge интерфейс для информации
 DOCKER_BRIDGE=$(docker network inspect vulnnet 2>/dev/null | grep -oP '"Name": "\K[^"]+' | head -1 || echo "")
 if [ -z "$DOCKER_BRIDGE" ]; then
