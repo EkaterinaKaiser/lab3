@@ -105,12 +105,21 @@ if [ -f ~/rules/suricata-rules.rules ]; then
   sudo chmod 644 /etc/suricata/rules/local.rules
   
   # Убеждаемся, что локальные правила включены в конфигурации
-  if ! grep -q "local.rules" /etc/suricata/suricata.yaml 2>/dev/null; then
+  if ! grep -q "^[[:space:]]*-[[:space:]]*local.rules" /etc/suricata/suricata.yaml 2>/dev/null; then
     echo "Adding local.rules to suricata.yaml configuration..."
+    # Проверяем, нет ли неправильного паттерна с дефисом
+    if grep -q "local.rules/custom_ioc.rules" /etc/suricata/suricata.yaml 2>/dev/null; then
+      echo "⚠️  Found incorrect rule pattern, fixing..."
+      sudo sed -i 's|local.rules/custom_ioc.rules|local.rules|g' /etc/suricata/suricata.yaml
+    fi
+    
     # Ищем секцию rule-files и добавляем туда
-    if grep -q "rule-files:" /etc/suricata/suricata.yaml; then
-      # Добавляем после rule-files:
-      sudo sed -i '/rule-files:/a\  - local.rules' /etc/suricata/suricata.yaml
+    if grep -q "^rule-files:" /etc/suricata/suricata.yaml; then
+      # Проверяем, нет ли уже local.rules (может быть с другим форматированием)
+      if ! grep -A 20 "^rule-files:" /etc/suricata/suricata.yaml | grep -q "local.rules"; then
+        # Добавляем после rule-files: с правильным отступом
+        sudo sed -i '/^rule-files:/a\  - local.rules' /etc/suricata/suricata.yaml
+      fi
     elif grep -q "default-rule-path:" /etc/suricata/suricata.yaml; then
       # Добавляем после default-rule-path
       sudo sed -i '/default-rule-path:/a\\nrule-files:\n  - local.rules' /etc/suricata/suricata.yaml
@@ -123,6 +132,16 @@ if [ -f ~/rules/suricata-rules.rules ]; then
     echo "✅ Added local.rules to configuration"
   else
     echo "✅ local.rules already in configuration"
+  fi
+  
+  # Убеждаемся, что default-rule-path настроен правильно
+  if ! grep -q "^default-rule-path:" /etc/suricata/suricata.yaml; then
+    echo "Adding default-rule-path..."
+    if grep -q "^rule-files:" /etc/suricata/suricata.yaml; then
+      sudo sed -i '/^rule-files:/i\default-rule-path: /etc/suricata/rules' /etc/suricata/suricata.yaml
+    else
+      echo "default-rule-path: /etc/suricata/rules" | sudo tee -a /etc/suricata/suricata.yaml
+    fi
   fi
   
   echo "✅ Custom rules loaded"
@@ -198,6 +217,7 @@ af-packet:\
 fi
 
 # Если Docker bridge найден и отличается от основного интерфейса, добавляем его
+# Используем af-packet для Docker bridge
 DOCKER_BRIDGE_ADDED=false
 if [ -n "$DOCKER_BRIDGE" ] && [ "$DOCKER_BRIDGE" != "$ACTIVE_INTERFACE" ] && ip link show "$DOCKER_BRIDGE" &>/dev/null; then
   echo "Adding Docker bridge $DOCKER_BRIDGE to af-packet configuration..."
@@ -209,7 +229,8 @@ if [ -n "$DOCKER_BRIDGE" ] && [ "$DOCKER_BRIDGE" != "$ACTIVE_INTERFACE" ] && ip 
     cluster-type: cluster_flow\
     defrag: yes\
     use-mmap: yes\
-    tpacket-v3: yes' /etc/suricata/suricata.yaml
+    tpacket-v3: yes\
+    buffer-size: 32768' /etc/suricata/suricata.yaml
     DOCKER_BRIDGE_ADDED=true
     echo "✅ Docker bridge $DOCKER_BRIDGE added to configuration"
   else
@@ -227,6 +248,43 @@ if [ "$ACTIVE_INTERFACE" != "any" ]; then
   else
     echo "⚠️  Interface $ACTIVE_INTERFACE not found, Suricata may fail to start"
   fi
+fi
+
+# Настраиваем Suricata для работы с NFQUEUE (для iptables перенаправления)
+echo "Configuring Suricata for NFQUEUE mode..."
+NFQUEUE_NUM=0
+
+# Проверяем, есть ли секция nfq в конфигурации
+if ! grep -q "^nfq:" /etc/suricata/suricata.yaml; then
+  echo "Adding NFQUEUE configuration..."
+  # Добавляем секцию nfq после af-packet или перед rule-files
+  if grep -q "^af-packet:" /etc/suricata/suricata.yaml; then
+    sudo sed -i '/^af-packet:/a\
+nfq:\
+  - mode: accept\
+    repeat-mark: 1\
+    repeat-mask: 1\
+    queue-num: '"$NFQUEUE_NUM"'
+' /etc/suricata/suricata.yaml
+  elif grep -q "^rule-files:" /etc/suricata/suricata.yaml; then
+    sudo sed -i '/^rule-files:/i\
+nfq:\
+  - mode: accept\
+    repeat-mark: 1\
+    repeat-mask: 1\
+    queue-num: '"$NFQUEUE_NUM"'
+' /etc/suricata/suricata.yaml
+  else
+    echo "" | sudo tee -a /etc/suricata/suricata.yaml
+    echo "nfq:" | sudo tee -a /etc/suricata/suricata.yaml
+    echo "  - mode: accept" | sudo tee -a /etc/suricata/suricata.yaml
+    echo "    repeat-mark: 1" | sudo tee -a /etc/suricata/suricata.yaml
+    echo "    repeat-mask: 1" | sudo tee -a /etc/suricata/suricata.yaml
+    echo "    queue-num: $NFQUEUE_NUM" | sudo tee -a /etc/suricata/suricata.yaml
+  fi
+  echo "✅ NFQUEUE configuration added (queue-num: $NFQUEUE_NUM)"
+else
+  echo "✅ NFQUEUE configuration already exists"
 fi
 
 # Проверяем конфигурацию Suricata

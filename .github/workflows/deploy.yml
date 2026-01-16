@@ -239,6 +239,48 @@ jobs:
               echo "⚠️  Docker bridge not found, Suricata may not see Docker traffic"
             fi
 
+      - name: Setup iptables for traffic redirection
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            chmod +x ~/scripts/setup-iptables.sh
+            bash ~/scripts/setup-iptables.sh
+            
+            echo ""
+            echo "=== Restarting Suricata to work with NFQUEUE ==="
+            # Останавливаем Suricata
+            sudo systemctl stop suricata 2>/dev/null || true
+            sudo pkill -9 suricata 2>/dev/null || true
+            sleep 2
+            
+            # Запускаем Suricata (он будет работать с NFQUEUE если настроен в конфигурации, а также с af-packet)
+            echo "Starting Suricata (will work with both af-packet and NFQUEUE if configured)..."
+            
+            # Проверяем конфигурацию перед запуском
+            CONFIG_TEST=$(sudo suricata -T -c /etc/suricata/suricata.yaml 2>&1 | tail -5 || true)
+            echo "Configuration test:"
+            echo "$CONFIG_TEST"
+            
+            # Запускаем Suricata через systemd (он будет использовать оба режима)
+            sudo systemctl start suricata 2>&1 || sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D 2>&1 || true
+            sleep 5
+            
+            if pgrep -x suricata > /dev/null; then
+              echo "✅ Suricata started successfully"
+              ps aux | grep suricata | grep -v grep | head -2
+              # Проверяем, работает ли Suricata
+              echo "Checking Suricata status..."
+              if sudo systemctl is-active --quiet suricata; then
+                sudo systemctl status suricata --no-pager -l | head -10 || true
+              fi
+            else
+              echo "⚠️  Suricata failed to start, checking logs..."
+              sudo journalctl -u suricata -n 30 --no-pager | tail -15 || true
+            fi
+
       - name: Install tools on attacker container
         uses: appleboy/ssh-action@v1.0.0
         with:
@@ -325,47 +367,36 @@ jobs:
             fi
             
             echo ""
-            echo "=== Ensuring Suricata monitors Docker network ==="
-            # Находим Docker bridge и убеждаемся, что Suricata его мониторит
+            echo "=== Ensuring iptables rules are active ==="
+            # Проверяем, что iptables правила активны для перенаправления трафика
+            echo "Checking iptables NFQUEUE rules for Docker network..."
+            
+            # Находим Docker bridge и сеть
             DOCKER_BRIDGE=$(docker network inspect vulnnet 2>/dev/null | jq -r '.[0].Options."com.docker.network.bridge.name" // empty' 2>/dev/null || echo "")
             if [ -z "$DOCKER_BRIDGE" ]; then
               DOCKER_BRIDGE=$(ip -br link show | grep -E '^br-' | awk '{print $1}' | head -1 || echo "")
             fi
+            DOCKER_NETWORK=$(docker network inspect vulnnet 2>/dev/null | jq -r '.[0].IPAM.Config[0].Subnet // "172.20.0.0/16"' 2>/dev/null || echo "172.20.0.0/16")
             
-            if [ -n "$DOCKER_BRIDGE" ] && ip link show "$DOCKER_BRIDGE" &>/dev/null; then
-              echo "Found Docker bridge: $DOCKER_BRIDGE"
-              # Проверяем, что интерфейс в конфигурации Suricata
-              NEED_RESTART=false
-              if ! grep -A 20 "^af-packet:" /etc/suricata/suricata.yaml | grep -q "interface: $DOCKER_BRIDGE"; then
-                echo "⚠️  Docker bridge $DOCKER_BRIDGE not in Suricata config, adding it..."
-                # Создаем временный файл с конфигурацией интерфейса используя printf
-                sudo printf '  - interface: %s\n    cluster-id: 98\n    cluster-type: cluster_flow\n    defrag: yes\n    use-mmap: yes\n    tpacket-v3: yes\n' "$DOCKER_BRIDGE" > /tmp/suricata_bridge_config.txt
-                # Вставляем после строки af-packet:
-                sudo sed -i '/^af-packet:/r /tmp/suricata_bridge_config.txt' /etc/suricata/suricata.yaml
-                sudo rm -f /tmp/suricata_bridge_config.txt
-                NEED_RESTART=true
+            if [ -n "$DOCKER_BRIDGE" ]; then
+              echo "Docker bridge: $DOCKER_BRIDGE"
+              echo "Docker network: $DOCKER_NETWORK"
+              
+              # Проверяем iptables правила
+              NFQUEUE_RULES=$(sudo iptables -t mangle -L FORWARD -n -v | grep -c "NFQUEUE.*$DOCKER_NETWORK" || echo "0")
+              if [ "$NFQUEUE_RULES" -eq "0" ]; then
+                echo "⚠️  No NFQUEUE rules found for Docker network, setting up iptables..."
+                chmod +x ~/scripts/setup-iptables.sh
+                bash ~/scripts/setup-iptables.sh
               else
-                echo "✅ Docker bridge $DOCKER_BRIDGE is in Suricata configuration"
-                # Все равно перезапускаем, чтобы убедиться, что Suricata видит интерфейс
-                NEED_RESTART=true
+                echo "✅ iptables NFQUEUE rules are active"
               fi
               
-              if [ "$NEED_RESTART" = "true" ]; then
-                echo "Restarting Suricata to ensure Docker network monitoring..."
-                sudo systemctl stop suricata 2>/dev/null || true
-                sudo pkill -9 suricata 2>/dev/null || true
-                sleep 3
-                # Проверяем конфигурацию перед запуском
-                sudo suricata -T -c /etc/suricata/suricata.yaml 2>&1 | tail -5 || true
-                sudo systemctl start suricata || sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D || true
-                sleep 5
-                if pgrep -x suricata > /dev/null; then
-                  echo "✅ Suricata restarted successfully"
-                  # Проверяем, какие интерфейсы Suricata видит
-                  sudo suricatasc -c "iface-list" 2>/dev/null || echo "Could not list interfaces"
-                else
-                  echo "⚠️  Suricata restart failed"
-                fi
+              # Проверяем, что Suricata настроен для NFQUEUE
+              if ! grep -q "^nfq:" /etc/suricata/suricata.yaml; then
+                echo "⚠️  NFQUEUE not configured in Suricata, it will be configured on next restart"
+              else
+                echo "✅ NFQUEUE is configured in Suricata"
               fi
             else
               echo "⚠️  Docker bridge not found"
@@ -375,12 +406,28 @@ jobs:
             docker exec attacker bash /tmp/attack.sh || true
             
             echo ""
-            echo "=== Ensuring Suricata is running and reloading rules ==="
+            echo "=== Ensuring Suricata is running in NFQUEUE mode and reloading rules ==="
+            # Проверяем iptables правила
+            echo "Checking iptables NFQUEUE rules..."
+            sudo iptables -t mangle -L FORWARD -n -v | grep -E "NFQUEUE|172.20" | head -3 || echo "⚠️  No NFQUEUE rules found in FORWARD chain"
+            
             # Убеждаемся, что Suricata запущен
             if ! sudo systemctl is-active --quiet suricata && ! pgrep -x suricata > /dev/null; then
               echo "Suricata not running, attempting to start..."
               sudo systemctl start suricata || sudo suricata -c /etc/suricata/suricata.yaml --af-packet -D || true
               sleep 3
+            else
+              echo "✅ Suricata is running"
+              ps aux | grep suricata | grep -v grep | head -2
+            fi
+            
+            # Проверяем, что iptables правила активны
+            echo "Verifying iptables NFQUEUE rules are active..."
+            NFQUEUE_RULES_COUNT=$(sudo iptables -t mangle -L FORWARD -n -v 2>/dev/null | grep -c "NFQUEUE" || echo "0")
+            if [ "$NFQUEUE_RULES_COUNT" -gt "0" ]; then
+              echo "✅ iptables NFQUEUE rules are active ($NFQUEUE_RULES_COUNT rules in FORWARD chain)"
+            else
+              echo "⚠️  No NFQUEUE rules found, traffic may not be redirected to Suricata"
             fi
             
             # Перезагружаем правила, чтобы убедиться, что они активны
@@ -409,11 +456,37 @@ jobs:
             # Проверяем, видит ли Suricata трафик внутри Docker сети
             if [ -f /var/log/suricata/eve.json ]; then
               DOCKER_TRAFFIC=$(sudo jq -r 'select(.src_ip | startswith("172.20.0.") or .dest_ip | startswith("172.20.0."))' /var/log/suricata/eve.json 2>/dev/null | wc -l || echo "0")
+              TOTAL_EVENTS=$(sudo jq -r '.' /var/log/suricata/eve.json 2>/dev/null | wc -l || echo "0")
+              echo "Total events in eve.json: $TOTAL_EVENTS"
               echo "Events involving Docker network (172.20.0.0/16): $DOCKER_TRAFFIC"
+              
               if [ "$DOCKER_TRAFFIC" -eq "0" ]; then
                 echo "⚠️  WARNING: Suricata may not be seeing Docker network traffic!"
                 echo "Docker network interfaces:"
                 ip link show | grep -E "^[0-9]+: (br-|docker|veth)" | head -5 || echo "No Docker interfaces found"
+                
+                # Проверяем, что Suricata запущен на правильном интерфейсе
+                echo ""
+                echo "Checking Suricata process and interfaces..."
+                if pgrep -x suricata > /dev/null; then
+                  ps aux | grep suricata | grep -v grep | head -2
+                  echo ""
+                  echo "Checking Suricata configuration for Docker bridge..."
+                  DOCKER_BRIDGE_CHECK=$(docker network inspect vulnnet 2>/dev/null | jq -r '.[0].Options."com.docker.network.bridge.name" // empty' 2>/dev/null || echo "")
+                  if [ -z "$DOCKER_BRIDGE_CHECK" ]; then
+                    DOCKER_BRIDGE_CHECK=$(ip -br link show | grep -E '^br-' | awk '{print $1}' | head -1 || echo "")
+                  fi
+                  if [ -n "$DOCKER_BRIDGE_CHECK" ]; then
+                    echo "Docker bridge found: $DOCKER_BRIDGE_CHECK"
+                    if grep -A 20 "^af-packet:" /etc/suricata/suricata.yaml | grep -q "interface: $DOCKER_BRIDGE_CHECK"; then
+                      echo "✅ Docker bridge $DOCKER_BRIDGE_CHECK is in Suricata configuration"
+                      echo "Checking if Suricata can capture on this interface..."
+                      sudo tcpdump -i "$DOCKER_BRIDGE_CHECK" -c 1 -n 2>&1 | head -3 || echo "⚠️  Cannot capture on $DOCKER_BRIDGE_CHECK (may need CAP_NET_RAW)"
+                    else
+                      echo "❌ Docker bridge $DOCKER_BRIDGE_CHECK NOT in Suricata configuration!"
+                    fi
+                  fi
+                fi
                 echo "Suricata may need to be configured to monitor Docker bridge interface"
               else
                 echo "✅ Suricata is seeing Docker network traffic"
