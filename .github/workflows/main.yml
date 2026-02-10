@@ -27,7 +27,7 @@ jobs:
 
       - name: Copy files
         run: |
-          scp -o StrictHostKeyChecking=no docker-compose.yml deploy.sh suricata/suricata.yaml test-suricata.sh "$HOST:"
+          scp -o StrictHostKeyChecking=no docker-compose.yml deploy.sh suricata/suricata.yaml smb.conf "$HOST:"
 
      # - name: Run deployment script
      #   run: |
