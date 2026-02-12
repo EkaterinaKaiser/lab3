@@ -21,13 +21,17 @@ jobs:
           ssh -o StrictHostKeyChecking=no "$HOST" 'curl -L "https://github.com/docker/compose/releases/download/v2.26.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose'
           ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x /usr/local/bin/docker-compose'
 
-      - name: Stop containers
-        run: |
-          ssh -o StrictHostKeyChecking=no "$HOST" 'docker-compose -f docker-compose.yml down -v --remove-orphans || true'
-
       - name: Copy files
         run: |
           scp -o StrictHostKeyChecking=no docker-compose.yml deploy.sh suricata/suricata.yaml smb.conf "$HOST:"
+
+      - name: Validate docker-compose.yml
+        run: |
+          ssh -o StrictHostKeyChecking=no "$HOST" 'docker-compose -f docker-compose.yml config --quiet'
+
+      - name: Stop containers
+        run: |
+          ssh -o StrictHostKeyChecking=no "$HOST" 'docker-compose -f docker-compose.yml down -v --remove-orphans || true'
 
       - name: Run deployment script
         run: |
