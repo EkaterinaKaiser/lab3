@@ -234,15 +234,23 @@ sudo tee /etc/default/evebox > /dev/null <<'EOEVEBOX'
 EVEBOX_OPTS="--database sqlite /var/log/suricata/eve.json"
 EOEVEBOX
 
+# Создание конфигурационного файла EveBox для отключения TLS
+sudo mkdir -p /etc/evebox
+sudo tee /etc/evebox/evebox.yaml > /dev/null <<'EOYAML'
+# EveBox Configuration
+tls: false
+authentication: false
+listen:
+  host: 0.0.0.0
+  port: 5636
+EOYAML
+
 # Настройка EveBox для прослушивания на всех интерфейсах через systemd override
 sudo mkdir -p /etc/systemd/system/evebox.service.d
-# Пробуем сначала с опциями отключения TLS, если не работает - используем переменные окружения
 sudo tee /etc/systemd/system/evebox.service.d/override.conf > /dev/null <<'EOSERVICE'
 [Service]
 ExecStart=
-ExecStart=/usr/bin/evebox server --database sqlite /var/log/suricata/eve.json --host 0.0.0.0 --port 5636
-Environment="EVEBOX_TLS=false"
-Environment="EVEBOX_AUTHENTICATION=false"
+ExecStart=/usr/bin/evebox server --config /etc/evebox/evebox.yaml --database sqlite /var/log/suricata/eve.json --host 0.0.0.0 --port 5636
 EOSERVICE
 
 # Права на чтение логов Suricata

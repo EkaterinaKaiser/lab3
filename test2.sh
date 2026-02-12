@@ -31,11 +31,26 @@ docker exec attacker bash -c "cd /root && python3 -m py_compile redis_attack.py"
 echo "Файл redis_attack.py скопирован и сделан исполняемым"
 
 echo ""
-echo "=== Шаг 4: Запуск атаки на Redis ==="
+echo "=== Шаг 4: Инициализация тестовых данных в Redis ==="
+echo "Добавление тестовых данных (конфиденциальная информация) в Redis..."
+# Используем Python для добавления данных, так как redis-cli может быть недоступен
+docker exec attacker bash -c "cd /root && source venv/bin/activate && python3 << 'PYEOF'
+import redis
+r = redis.Redis(host='172.20.0.102', port=6379, decode_responses=True)
+r.set('api_key', 'secret_api_key_12345')
+r.set('user:admin:password', 'admin123')
+r.set('user:guest:password', 'guest456')
+r.set('credit_card', '4111-1111-1111-1111')
+print('Тестовые данные добавлены в Redis')
+PYEOF
+" || echo "Ошибка при добавлении тестовых данных"
+
+echo ""
+echo "=== Шаг 5: Запуск атаки на Redis ==="
 docker exec attacker bash -c "cd /root && source venv/bin/activate && python3 redis_attack.py 172.20.0.102 6379"
 echo ""
 
-echo "=== Шаг 5: Проверка результата атаки ==="
+echo "=== Шаг 6: Проверка результата атаки ==="
 echo "Проверка файла /tmp/redis_test.txt в контейнере victim-redis:"
 if docker exec victim-redis test -f /tmp/redis_test.txt 2>/dev/null; then
     echo "Файл найден!"
