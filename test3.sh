@@ -31,11 +31,41 @@ docker exec attacker bash -c "cd /root && python3 -m py_compile minio_cve_exploi
 echo "Файл minio_cve_exploit.py скопирован и сделан исполняемым"
 
 echo ""
-echo "=== Шаг 4: Запуск эксплуатации CVE-2023-28432 на MinIO ==="
+echo "=== Шаг 4: Инициализация тестовых данных в MinIO ==="
+echo "Создание тестового bucket в MinIO..."
+# Используем Python для создания тестового bucket с известными credentials
+docker exec attacker bash -c "cd /root && source venv/bin/activate && python3 << 'PYEOF'
+import boto3
+try:
+    s3_client = boto3.client(
+        's3',
+        endpoint_url='http://172.20.0.103:9000',
+        aws_access_key_id='minioadmin',
+        aws_secret_access_key='minioadmin-vulhub',
+        region_name='us-east-1'
+    )
+    # Создание тестового bucket
+    test_bucket = 'cve-2023-28432-pwned'
+    try:
+        s3_client.create_bucket(Bucket=test_bucket)
+        print(f'[+] Создан тестовый bucket: {test_bucket}')
+    except Exception as e:
+        if 'BucketAlreadyOwnedByYou' in str(e) or 'BucketAlreadyExists' in str(e):
+            print(f'[+] Bucket {test_bucket} уже существует')
+        else:
+            print(f'[-] Ошибка создания bucket: {e}')
+    print('Тестовые данные добавлены в MinIO')
+except Exception as e:
+    print(f'Ошибка при добавлении тестовых данных: {e}')
+PYEOF
+" || echo "Ошибка при добавлении тестовых данных"
+
+echo ""
+echo "=== Шаг 5: Запуск эксплуатации CVE-2023-28432 на MinIO ==="
 docker exec attacker bash -c "cd /root && source venv/bin/activate && python3 minio_cve_exploit.py http://172.20.0.103:9000"
 echo ""
 
-echo "=== Шаг 5: Проверка результата эксплуатации ==="
+echo "=== Шаг 6: Проверка результата эксплуатации ==="
 echo "Проверка созданного bucket в MinIO:"
 docker exec attacker bash -c "cd /root && source venv/bin/activate && python3 << 'PYEOF'
 import boto3
