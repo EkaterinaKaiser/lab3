@@ -230,8 +230,9 @@ sudo apt-get install evebox
 sudo usermod -a -G suricata evebox
 
 # EveBox: читать события напрямую из eve.json (SQLite + файл логов Suricata)
+# Настройка для прослушивания на всех интерфейсах (0.0.0.0) для доступа извне
 sudo tee /etc/default/evebox > /dev/null <<'EOEVEBOX'
-EVEBOX_OPTS="--database sqlite /var/log/suricata/eve.json"
+EVEBOX_OPTS="--database sqlite /var/log/suricata/eve.json --listen 0.0.0.0:5636"
 EOEVEBOX
 
 # Права на чтение логов Suricata
@@ -247,6 +248,23 @@ if [ -d /var/log/suricata/eve.json ]; then
     sudo systemctl restart suricata
 fi
 
+# Открытие порта 5636 в файрволе (если используется ufw)
+if command -v ufw &> /dev/null; then
+    sudo ufw allow 5636/tcp || true
+fi
+
+# Открытие порта 5636 в iptables (если не используется ufw)
+if ! command -v ufw &> /dev/null; then
+    sudo iptables -I INPUT -p tcp --dport 5636 -j ACCEPT 2>/dev/null || true
+    sudo netfilter-persistent save 2>/dev/null || true
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl restart evebox
 sudo systemctl enable evebox
+
+# Проверка статуса EveBox
+echo "Проверка статуса EveBox..."
+sudo systemctl status evebox --no-pager | head -20 || true
+echo "Проверка прослушивания порта 5636..."
+sudo netstat -tulpn | grep 5636 || sudo ss -tulpn | grep 5636 || echo "Порт 5636 не найден в списке прослушивающих портов"
