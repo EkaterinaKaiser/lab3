@@ -6,6 +6,22 @@ sudo apt-get update -qq
 sudo apt-get install -y docker.io curl jq iptables-persistent libnetfilter-queue1
 sudo systemctl enable --now docker
 
+# Остановка и удаление старой версии EveBox (если установлена)
+if systemctl is-active --quiet evebox 2>/dev/null; then
+    echo "Остановка службы EveBox..."
+    sudo systemctl stop evebox || true
+fi
+if systemctl is-enabled --quiet evebox 2>/dev/null; then
+    echo "Отключение автозапуска EveBox..."
+    sudo systemctl disable evebox || true
+fi
+if dpkg -l | grep -q "^ii.*evebox"; then
+    echo "Удаление пакета EveBox..."
+    sudo apt-get remove -y evebox || true
+    sudo apt-get purge -y evebox || true
+    sudo apt-get autoremove -y || true
+fi
+
 # Bridge netfilter setup
 sudo modprobe br_netfilter
 echo "br_netfilter" | sudo tee /etc/modules-load.d/br_netfilter.conf >/dev/null
@@ -198,24 +214,22 @@ systemctl restart suricata
 systemctl status suricata --no-pager
 
 sudo apt-get install curl
-curl -fsSL https://evebox.org/files/GPG-KEY-evebox -o /etc/apt/keyrings/evebox.asc
-echo "deb [signed-by=/etc/apt/keyrings/evebox.asc] https://evebox.org/files/debian stable main" | sudo tee /etc/apt/sources.list.d/evebox.list
-sudo apt-get update
-sudo apt-get install evebox
 
-sudo usermod -a -G suricata evebox
+# Установка EveBox закомментирована - используем версию из контейнера
+# curl -fsSL https://evebox.org/files/GPG-KEY-evebox -o /etc/apt/keyrings/evebox.asc
+# echo "deb [signed-by=/etc/apt/keyrings/evebox.asc] https://evebox.org/files/debian stable main" | sudo tee /etc/apt/sources.list.d/evebox.list
+# sudo apt-get update
+# sudo apt-get install evebox
+# sudo usermod -a -G suricata evebox
+# sudo tee /etc/default/evebox > /dev/null <<'EOEVEBOX'
+# EVEBOX_OPTS="--database sqlite /var/log/suricata/eve.json"
+# EOEVEBOX
+# sudo systemctl daemon-reload
+# sudo systemctl restart evebox
+# sudo systemctl enable evebox
 
-# EveBox: читать события напрямую из eve.json (SQLite + файл логов Suricata)
-sudo tee /etc/default/evebox > /dev/null <<'EOEVEBOX'
-EVEBOX_OPTS="--database sqlite /var/log/suricata/eve.json"
-EOEVEBOX
-
-# Права на чтение логов Suricata для пользователя evebox
+# Права на чтение логов Suricata (нужны для контейнера evebox)
 sudo chown -R root:suricata /var/log/suricata
 sudo chmod 750 /var/log/suricata
 sudo touch /var/log/suricata/eve.json
 sudo chmod 640 /var/log/suricata/eve.json
-
-sudo systemctl daemon-reload
-sudo systemctl restart evebox
-sudo systemctl enable evebox
