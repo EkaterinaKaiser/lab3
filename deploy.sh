@@ -64,7 +64,7 @@ alert tcp any any -> any 61616 (msg:"[IDS] ActiveMQ OpenWire Protocol Detected";
 alert tcp any any -> any 61616 (msg:"[IDS] ActiveMQ Java Deserialization CVE-2023-46604"; flow:to_server,established; content:"ProcessBuilder"; nocase; classtype:attempted-admin; sid:3000003; rev:1;)
 
 # Блокировка подозрительных ActiveMQ запросов
-drop tcp any any -> any 61616 (msg:"[IPS] ActiveMQ Exploit Attempt Blocked"; flow:to_server,established; content:"ClassPathXmlApplicationContext"; nocase; threshold: type limit, track by_src, count 1, seconds 60; classtype:attempted-admin; sid:3000004; rev:1;)
+# drop tcp any any -> any 61616 (msg:"[IPS] ActiveMQ Exploit Attempt Blocked"; flow:to_server,established; content:"ClassPathXmlApplicationContext"; nocase; threshold: type limit, track by_src, count 1, seconds 60; classtype:attempted-admin; sid:3000004; rev:1;)
 
 # Обнаружение Spring Beans в трафике
 alert tcp any any -> any 61616 (msg:"[IDS] ActiveMQ Spring Beans Configuration Detected"; flow:to_server,established; content:"<beans"; nocase; classtype:attempted-admin; sid:3000005; rev:1;)
