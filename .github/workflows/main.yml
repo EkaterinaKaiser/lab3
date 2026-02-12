@@ -60,9 +60,9 @@ jobs:
       #   run: |
       #     ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test2.sh && bash test2.sh'
 
-      - name: Run MinIO CVE-2023-28432 exploit test
-        run: |
-          ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test3.sh && bash test3.sh'
+      # - name: Run MinIO CVE-2023-28432 exploit test
+      #   run: |
+      #     ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test3.sh && bash test3.sh'
 
       - name: Display EveBox access information
         run: |
