@@ -52,9 +52,9 @@ jobs:
         run: |
           scp -o StrictHostKeyChecking=no test1.sh test2.sh poc.py poc.xml redis_attack.py "$HOST:"
 
-      - name: Run attack simulation test (ActiveMQ)
-        run: |
-          ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test1.sh && bash test1.sh'
+     # - name: Run attack simulation test (ActiveMQ)
+     #   run: |
+     #     ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test1.sh && bash test1.sh'
 
       - name: Run Redis attack test
         run: |

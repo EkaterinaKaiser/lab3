@@ -55,19 +55,19 @@ sudo cp "$SURICATA_CONFIG" /etc/suricata/suricata.yaml
 # Создание правил Suricata
 cat > /etc/suricata/rules/local.rules <<'EORULES'
 # Обнаружение ActiveMQ подключений
-alert tcp any any -> any 61616 (msg:"[IDS] Apache ActiveMQ Connection Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000001; rev:1;)
+# alert tcp any any -> any 61616 (msg:"[IDS] Apache ActiveMQ Connection Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000001; rev:1;)
 
 # Обнаружение OpenWire протокола
-alert tcp any any -> any 61616 (msg:"[IDS] ActiveMQ OpenWire Protocol Detected"; flow:to_server,established; content:"OpenWire"; nocase; classtype:policy-violation; sid:3000002; rev:1;)
+# alert tcp any any -> any 61616 (msg:"[IDS] ActiveMQ OpenWire Protocol Detected"; flow:to_server,established; content:"OpenWire"; nocase; classtype:policy-violation; sid:3000002; rev:1;)
 
 # Обнаружение Java десериализации (ProcessBuilder)
-alert tcp any any -> any 61616 (msg:"[IDS] ActiveMQ Java Deserialization CVE-2023-46604"; flow:to_server,established; content:"ProcessBuilder"; nocase; classtype:attempted-admin; sid:3000003; rev:1;)
+#alert tcp any any -> any 61616 (msg:"[IDS] ActiveMQ Java Deserialization CVE-2023-46604"; flow:to_server,established; content:"ProcessBuilder"; nocase; classtype:attempted-admin; sid:3000003; rev:1;)
 
 # Блокировка подозрительных ActiveMQ запросов
-drop tcp any any -> any 61616 (msg:"[IPS] ActiveMQ Exploit Attempt Blocked"; flow:to_server,established; content:"ClassPathXmlApplicationContext"; nocase; threshold: type limit, track by_src, count 1, seconds 60; classtype:attempted-admin; sid:3000004; rev:1;)
+# drop tcp any any -> any 61616 (msg:"[IPS] ActiveMQ Exploit Attempt Blocked"; flow:to_server,established; content:"ClassPathXmlApplicationContext"; nocase; threshold: type limit, track by_src, count 1, seconds 60; classtype:attempted-admin; sid:3000004; rev:1;)
 
 # Обнаружение Spring Beans в трафике
-alert tcp any any -> any 61616 (msg:"[IDS] ActiveMQ Spring Beans Configuration Detected"; flow:to_server,established; content:"<beans"; nocase; classtype:attempted-admin; sid:3000005; rev:1;)
+# alert tcp any any -> any 61616 (msg:"[IDS] ActiveMQ Spring Beans Configuration Detected"; flow:to_server,established; content:"<beans"; nocase; classtype:attempted-admin; sid:3000005; rev:1;)
 
 # Обнаружение Redis подключений
 alert tcp any any -> any 6379 (msg:"[IDS] Redis Unauthorized Access Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000101; rev:1;)
@@ -82,7 +82,7 @@ alert tcp any any -> any 6379 (msg:"[IDS] Redis SAVE Command Detected"; flow:to_
 drop tcp any any -> any 6379 (msg:"[IPS] Redis Dangerous Operation Blocked"; flow:to_server,established; content:"config set dir"; nocase; threshold: type limit, track by_src, count 1, seconds 60; classtype:attempted-admin; sid:3000104; rev:1;)
 
 # Обнаружение попыток записи веб-шелла
-alert tcp any any -> any 6379 (msg:"[IDS] Redis Web Shell Upload Attempt"; flow:to_server,established; content:"<?php"; nocase; classtype:trojan-activity; sid:3000105; rev:1;)
+#alert tcp any any -> any 6379 (msg:"[IDS] Redis Web Shell Upload Attempt"; flow:to_server,established; content:"<?php"; nocase; classtype:trojan-activity; sid:3000105; rev:1;)
 
 # Обнаружение манипуляций с dbfilename
 alert tcp any any -> any 6379 (msg:"[IDS] Redis DBFilename Manipulation"; flow:to_server,established; content:"dbfilename"; nocase; classtype:attempted-admin; sid:3000106; rev:1;)
@@ -236,10 +236,13 @@ EOEVEBOX
 
 # Настройка EveBox для прослушивания на всех интерфейсах через systemd override
 sudo mkdir -p /etc/systemd/system/evebox.service.d
+# Пробуем сначала с опциями отключения TLS, если не работает - используем переменные окружения
 sudo tee /etc/systemd/system/evebox.service.d/override.conf > /dev/null <<'EOSERVICE'
 [Service]
 ExecStart=
-ExecStart=/usr/bin/evebox server --database sqlite /var/log/suricata/eve.json --host 0.0.0.0 --port 5636 --no-tls --no-authentication-required
+ExecStart=/usr/bin/evebox server --database sqlite /var/log/suricata/eve.json --host 0.0.0.0 --port 5636
+Environment="EVEBOX_TLS=false"
+Environment="EVEBOX_AUTHENTICATION=false"
 EOSERVICE
 
 # Права на чтение логов Suricata
@@ -268,10 +271,33 @@ fi
 
 sudo systemctl daemon-reload
 sudo systemctl restart evebox
+sleep 3
 sudo systemctl enable evebox
 
 # Проверка статуса EveBox
 echo "Проверка статуса EveBox..."
-sudo systemctl status evebox --no-pager | head -20 || true
+if sudo systemctl is-active --quiet evebox; then
+    echo "EveBox запущен успешно"
+    sudo systemctl status evebox --no-pager | head -20 || true
+else
+    echo "ВНИМАНИЕ: EveBox не запущен!"
+    echo "Последние логи:"
+    sudo journalctl -u evebox -n 20 --no-pager || true
+    echo "Попытка запуска без переменных окружения (только host и port)..."
+    sudo tee /etc/systemd/system/evebox.service.d/override.conf > /dev/null <<'EOALT'
+[Service]
+ExecStart=
+ExecStart=/usr/bin/evebox server --database sqlite /var/log/suricata/eve.json --host 0.0.0.0 --port 5636
+EOALT
+    sudo systemctl daemon-reload
+    sudo systemctl restart evebox
+    sleep 2
+    sudo systemctl status evebox --no-pager | head -20 || true
+fi
+
 echo "Проверка прослушивания порта 5636..."
-sudo netstat -tulpn | grep 5636 || sudo ss -tulpn | grep 5636 || echo "Порт 5636 не найден в списке прослушивающих портов"
+if command -v ss &> /dev/null; then
+    sudo ss -tulpn | grep 5636 || echo "Порт 5636 не найден в списке прослушивающих портов"
+else
+    sudo netstat -tulpn 2>/dev/null | grep 5636 || echo "Порт 5636 не найден (netstat недоступен)"
+fi
