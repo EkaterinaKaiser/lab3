@@ -82,7 +82,7 @@ alert tcp any any -> any 6379 (msg:"[IDS] Redis SAVE Command Detected"; flow:to_
 drop tcp any any -> any 6379 (msg:"[IPS] Redis Dangerous Operation Blocked"; flow:to_server,established; content:"config set dir"; nocase; threshold: type limit, track by_src, count 1, seconds 60; classtype:attempted-admin; sid:3000104; rev:1;)
 
 # Обнаружение попыток записи веб-шелла
-#alert tcp any any -> any 6379 (msg:"[IDS] Redis Web Shell Upload Attempt"; flow:to_server,established; content:"<?php"; nocase; classtype:trojan-activity; sid:3000105; rev:1;)
+alert tcp any any -> any 6379 (msg:"[IDS] Redis Web Shell Upload Attempt"; flow:to_server,established; content:"<?php"; nocase; classtype:trojan-activity; sid:3000105; rev:1;)
 
 # Обнаружение манипуляций с dbfilename
 alert tcp any any -> any 6379 (msg:"[IDS] Redis DBFilename Manipulation"; flow:to_server,established; content:"dbfilename"; nocase; classtype:attempted-admin; sid:3000106; rev:1;)
@@ -234,24 +234,50 @@ sudo tee /etc/default/evebox > /dev/null <<'EOEVEBOX'
 EVEBOX_OPTS="--database sqlite /var/log/suricata/eve.json"
 EOEVEBOX
 
-# Создание конфигурационного файла EveBox для отключения TLS
-sudo mkdir -p /etc/evebox
-sudo tee /etc/evebox/evebox.yaml > /dev/null <<'EOYAML'
-# EveBox Configuration
-tls: false
-authentication: false
-listen:
-  host: 0.0.0.0
-  port: 5636
-EOYAML
-
-# Настройка EveBox для прослушивания на всех интерфейсах через systemd override
+# Настройка EveBox для прослушивания на localhost:5637 (внутренний порт)
+# Используем nginx как reverse proxy для HTTP доступа
 sudo mkdir -p /etc/systemd/system/evebox.service.d
 sudo tee /etc/systemd/system/evebox.service.d/override.conf > /dev/null <<'EOSERVICE'
 [Service]
 ExecStart=
-ExecStart=/usr/bin/evebox server --config /etc/evebox/evebox.yaml --database sqlite /var/log/suricata/eve.json --host 0.0.0.0 --port 5636
+ExecStart=/usr/bin/evebox server --database sqlite /var/log/suricata/eve.json --host 127.0.0.1 --port 5637
 EOSERVICE
+
+# Установка и настройка nginx как reverse proxy для EveBox
+if ! command -v nginx &> /dev/null; then
+    sudo apt-get install -y nginx
+fi
+
+# Создание конфигурации nginx для проксирования HTTP на EveBox
+sudo tee /etc/nginx/sites-available/evebox > /dev/null <<'EONGINX'
+server {
+    listen 5636;
+    server_name _;
+    
+    location / {
+        proxy_pass http://127.0.0.1:5637;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket support (если нужно)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Таймауты
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+EONGINX
+
+# Активация конфигурации nginx
+sudo ln -sf /etc/nginx/sites-available/evebox /etc/nginx/sites-enabled/evebox
+sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+sudo nginx -t && sudo systemctl reload nginx || echo "Ошибка конфигурации nginx"
 
 # Права на чтение логов Suricata
 sudo chown -R root:suricata /var/log/suricata
@@ -282,6 +308,11 @@ sudo systemctl restart evebox
 sleep 3
 sudo systemctl enable evebox
 
+# Запуск и включение nginx
+sudo systemctl enable nginx
+sudo systemctl restart nginx
+sleep 2
+
 # Проверка статуса EveBox
 echo "Проверка статуса EveBox..."
 if sudo systemctl is-active --quiet evebox; then
@@ -303,9 +334,22 @@ EOALT
     sudo systemctl status evebox --no-pager | head -20 || true
 fi
 
-echo "Проверка прослушивания порта 5636..."
+echo "Проверка прослушивания портов..."
 if command -v ss &> /dev/null; then
-    sudo ss -tulpn | grep 5636 || echo "Порт 5636 не найден в списке прослушивающих портов"
+    echo "Порт 5636 (nginx HTTP proxy):"
+    sudo ss -tulpn | grep 5636 || echo "Порт 5636 не найден"
+    echo "Порт 5637 (EveBox внутренний):"
+    sudo ss -tulpn | grep 5637 || echo "Порт 5637 не найден"
 else
-    sudo netstat -tulpn 2>/dev/null | grep 5636 || echo "Порт 5636 не найден (netstat недоступен)"
+    sudo netstat -tulpn 2>/dev/null | grep -E "5636|5637" || echo "Порты не найдены (netstat недоступен)"
+fi
+
+# Проверка статуса nginx
+echo ""
+echo "Проверка статуса nginx..."
+if sudo systemctl is-active --quiet nginx; then
+    echo "nginx запущен успешно"
+else
+    echo "ВНИМАНИЕ: nginx не запущен!"
+    sudo systemctl status nginx --no-pager | head -10 || true
 fi
