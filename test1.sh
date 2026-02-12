@@ -26,18 +26,32 @@ echo "Ожидание обработки событий Suricata..."
 echo ""
 echo "=== Шаг 5: Проверка содержимого /tmp в victim-activemq ==="
 docker exec victim-activemq ls -la /tmp
+echo ""
+echo "Содержимое файла /tmp/activeMQ-RCE-success (если существует):"
+docker exec victim-activemq cat /tmp/activeMQ-RCE-success 2>/dev/null || echo "Файл не найден"
 
 echo ""
 echo "=== Шаг 6: Последние записи из Suricata ==="
-# Пытаемся получить логи разными способами
+# Получаем логи с локального хоста (где запущен Suricata)
 if [ -f /var/log/suricata/eve.json ]; then
-  echo "Логи с локального хоста:"
-  tail -n 50 /var/log/suricata/eve.json | jq -r 'select(.event_type=="alert" or .event_type=="http") | "\(.timestamp) [\(.event_type)] \(.alert.signature)"' 2>/dev/null || tail -n 50 /var/log/suricata/eve.json
-elif [ -n "$HOST" ]; then
-  echo "Логи с удаленного хоста:"
-  ssh -o StrictHostKeyChecking=no "$HOST" 'tail -n 50 /var/log/suricata/eve.json 2>/dev/null | jq -r "select(.event_type==\"alert\" or .event_type==\"http\") | \"\(.timestamp) [\(.event_type)] \(.alert.signature)\"" 2>/dev/null || tail -n 50 /var/log/suricata/eve.json 2>/dev/null' || echo "Логи Suricata недоступны. Проверьте через EveBox на порту 5636"
+  echo "Последние 5 записей из /var/log/suricata/eve.json:"
+  # Пытаемся использовать jq для красивого вывода, если доступен
+  if command -v jq &> /dev/null; then
+    tail -n 20 /var/log/suricata/eve.json | jq -r 'select(.event_type=="alert" or .event_type=="http" or .event_type=="flow") | "\(.timestamp // .ts // "N/A") [\(.event_type)] \(.alert.signature // .alert.msg // "N/A")"' 2>/dev/null | tail -n 5 || tail -n 5 /var/log/suricata/eve.json
+  else
+    # Если jq недоступен, просто выводим последние 5 строк
+    tail -n 5 /var/log/suricata/eve.json
+  fi
+elif sudo test -f /var/log/suricata/eve.json 2>/dev/null; then
+  echo "Последние 5 записей из /var/log/suricata/eve.json (через sudo):"
+  if command -v jq &> /dev/null; then
+    sudo tail -n 20 /var/log/suricata/eve.json | jq -r 'select(.event_type=="alert" or .event_type=="http" or .event_type=="flow") | "\(.timestamp // .ts // "N/A") [\(.event_type)] \(.alert.signature // .alert.msg // "N/A")"' 2>/dev/null | tail -n 5 || sudo tail -n 5 /var/log/suricata/eve.json
+  else
+    sudo tail -n 5 /var/log/suricata/eve.json
+  fi
 else
-  echo "Логи Suricata недоступны напрямую. Проверьте через EveBox на порту 5636 или на хосте в /var/log/suricata/eve.json"
+  echo "Файл /var/log/suricata/eve.json не найден. Проверьте статус Suricata:"
+  sudo systemctl status suricata --no-pager -l || echo "Suricata не запущена или недоступна"
 fi
 
 echo ""
