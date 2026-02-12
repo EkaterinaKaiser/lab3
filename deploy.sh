@@ -94,22 +94,22 @@ alert tcp any any -> any 6379 (msg:"[IDS] Redis FLUSHALL Command Detected"; flow
 alert tcp any any -> any 6379 (msg:"[IDS] Redis Multiple Operations Detected"; flow:to_server,established; threshold: type threshold, track by_src, count 20, seconds 60; classtype:attempted-recon; sid:3000108; rev:1;)
 
 # Обнаружение CVE-2023-28432 Bootstrap Verify запроса
-alert http any any -> any 9000 (msg:"[IDS] MinIO CVE-2023-28432 Bootstrap Verify Request"; flow:to_server,established; http_uri; content:"/minio/bootstrap/v1/verify"; http_method; content:"POST"; classtype:attempted-admin; sid:3000201; rev:1;)
+alert http any any -> any 9000 (msg:"[IDS] MinIO CVE-2023-28432 Bootstrap Verify Request"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; classtype:attempted-admin; sid:3000201; rev:1;)
 
 # Блокировка CVE-2023-28432 эксплуатации
-drop http any any -> any 9000 (msg:"[IPS] MinIO CVE-2023-28432 Exploitation Blocked"; flow:to_server,established; http_uri; content:"/minio/bootstrap/v1/verify"; http_method; content:"POST"; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000202; rev:1;)
+drop http any any -> any 9000 (msg:"[IPS] MinIO CVE-2023-28432 Exploitation Blocked"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000202; rev:1;)
 
 # Обнаружение MinIO admin API запросов
-alert http any any -> any 9000 (msg:"[IDS] MinIO Admin API Request Detected"; flow:to_server,established; http_uri; content:"/minio/admin"; classtype:attempted-admin; sid:3000203; rev:1;)
+alert http any any -> any 9000 (msg:"[IDS] MinIO Admin API Request Detected"; flow:to_server,established; content:"/minio/admin"; http_uri; classtype:attempted-admin; sid:3000203; rev:1;)
 
 # Обнаружение S3 API операций
-alert http any any -> any 9000 (msg:"[IDS] MinIO S3 API Operation Detected"; flow:to_server,established; http_header; content:"aws4_request"; classtype:policy-violation; sid:3000204; rev:1;)
+alert http any any -> any 9000 (msg:"[IDS] MinIO S3 API Operation Detected"; flow:to_server,established; content:"aws4_request"; http_header; classtype:policy-violation; sid:3000204; rev:1;)
 
 # Обнаружение создания bucket'ов
-alert http any any -> any 9000 (msg:"[IDS] MinIO Bucket Creation Detected"; flow:to_server,established; http_method; content:"PUT"; classtype:policy-violation; sid:3000205; rev:1;)
+alert http any any -> any 9000 (msg:"[IDS] MinIO Bucket Creation Detected"; flow:to_server,established; content:"PUT"; http_method; classtype:policy-violation; sid:3000205; rev:1;)
 
 # Обнаружение подозрительных имен bucket'ов
-alert http any any -> any 9000 (msg:"[IDS] MinIO Suspicious Bucket Name"; flow:to_server,established; http_uri; pcre:"/\/(hack|exploit|malware|backdoor|pwned|compromised|cve)/i"; classtype:trojan-activity; sid:3000206; rev:1;)
+alert http any any -> any 9000 (msg:"[IDS] MinIO Suspicious Bucket Name"; flow:to_server,established; pcre:"/\/(hack|exploit|malware|backdoor|pwned|compromised|cve)/i"; http_uri; classtype:trojan-activity; sid:3000206; rev:1;)
 
 # Обнаружение консольного доступа
 alert http any any -> any 9001 (msg:"[IDS] MinIO Console Access Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000207; rev:1;)
@@ -136,25 +136,25 @@ alert tcp any any -> any 445 (msg:"[IDS] SMB Multiple File Operations"; flow:to_
 alert tcp any any -> any 445 (msg:"[IDS] SMB Write to myshare"; flow:to_server,established; content:"myshare"; nocase; classtype:policy-violation; sid:3000306; rev:1;)
 
 # Обнаружение доступа к Jenkins
-alert http any any -> any 8080 (msg:"[IDS] Jenkins Web Interface Access"; flow:to_server,established; http_uri; content:"/"; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000501; rev:1;)
+alert http any any -> any 8080 (msg:"[IDS] Jenkins Web Interface Access"; flow:to_server,established; content:"/"; http_uri; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000501; rev:1;)
 
 # Обнаружение загрузки jenkins-cli.jar
-alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI JAR Download"; flow:to_server,established; http_uri; content:"jenkins-cli.jar"; classtype:attempted-recon; sid:3000502; rev:1;)
+alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI JAR Download"; flow:to_server,established; content:"jenkins-cli.jar"; http_uri; classtype:attempted-recon; sid:3000502; rev:1;)
 
 # Обнаружение Jenkins CLI операций (по User-Agent)
-alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI Command Execution"; flow:to_server,established; http_user_agent; content:"Jenkins CLI"; classtype:attempted-admin; sid:3000503; rev:1;)
+alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI Command Execution"; flow:to_server,established; content:"Jenkins CLI"; http_user_agent; classtype:attempted-admin; sid:3000503; rev:1;)
 
 # Блокировка CVE-2024-23897 эксплуатации (символ @ в запросах)
-drop http any any -> any 8080 (msg:"[IPS] Jenkins CVE-2024-23897 File Read Blocked"; flow:to_server,established; http_request_body; content:"@/"; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000504; rev:1;)
+drop http any any -> any 8080 (msg:"[IPS] Jenkins CVE-2024-23897 File Read Blocked"; flow:to_server,established; content:"@/"; http.request_body; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000504; rev:1;)
 
 # Обнаружение попыток чтения системных файлов
-alert http any any -> any 8080 (msg:"[IDS] Jenkins System File Access"; flow:to_server,established; http_request_body; pcre:"/@\/(etc|proc|var)/"; classtype:attempted-admin; sid:3000505; rev:1;)
+alert http any any -> any 8080 (msg:"[IDS] Jenkins System File Access"; flow:to_server,established; pcre:"/@\/(etc|proc|var)/"; http.request_body; classtype:attempted-admin; sid:3000505; rev:1;)
 
 # Обнаружение попыток чтения секретов Jenkins
-alert http any any -> any 8080 (msg:"[IDS] Jenkins Secret File Access"; flow:to_server,established; http_request_body; content:"@/var/jenkins_home/secret"; classtype:attempted-admin; sid:3000506; rev:1;)
+alert http any any -> any 8080 (msg:"[IDS] Jenkins Secret File Access"; flow:to_server,established; content:"@/var/jenkins_home/secret"; http.request_body; classtype:attempted-admin; sid:3000506; rev:1;)
 
 # Обнаружение множественных Jenkins CLI операций
-alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI Multiple Operations"; flow:to_server,established; http_uri; content:"/cli"; threshold: type threshold, track by_src, count 10, seconds 60; classtype:attempted-recon; sid:3000507; rev:1;)
+alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI Multiple Operations"; flow:to_server,established; content:"/cli"; http_uri; threshold: type threshold, track by_src, count 10, seconds 60; classtype:attempted-recon; sid:3000507; rev:1;)
 
 # Обнаружение доступа к JNLP порту (50000)
 alert tcp any any -> any 50000 (msg:"[IDS] Jenkins JNLP Port Access"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000508; rev:1;)
@@ -163,7 +163,7 @@ alert tcp any any -> any 50000 (msg:"[IDS] Jenkins JNLP Port Access"; flow:to_se
 alert tcp any any -> any 5005 (msg:"[IDS] Jenkins Debug Port Access"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:attempted-admin; sid:3000509; rev:1;)
 
 # Обнаружение HTTP POST к CLI endpoint
-alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI HTTP POST"; flow:to_server,established; http_method; content:"POST"; http_uri; content:"/cli"; classtype:attempted-admin; sid:3000510; rev:1;)
+alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI HTTP POST"; flow:to_server,established; content:"POST"; http_method; content:"/cli"; http_uri; classtype:attempted-admin; sid:3000510; rev:1;)
 
 # Блокировка агрессивного сканирования Jenkins
 drop http any any -> any 8080 (msg:"[IPS] Jenkins Aggressive Scanning Blocked"; flow:to_server,established; threshold: type both, track by_src, count 50, seconds 120; classtype:attempted-dos; sid:3000511; rev:1;)
@@ -231,7 +231,10 @@ EOEVEBOX
 # Права на чтение логов Suricata
 sudo chown -R root:suricata /var/log/suricata
 sudo chmod 750 /var/log/suricata
+# Удалить eve.json если это директория, затем создать файл
+sudo rm -rf /var/log/suricata/eve.json
 sudo touch /var/log/suricata/eve.json
+sudo chown root:suricata /var/log/suricata/eve.json
 sudo chmod 640 /var/log/suricata/eve.json
 
 sudo systemctl daemon-reload
