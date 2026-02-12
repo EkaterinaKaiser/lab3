@@ -230,10 +230,17 @@ sudo apt-get install evebox
 sudo usermod -a -G suricata evebox
 
 # EveBox: читать события напрямую из eve.json (SQLite + файл логов Suricata)
-# Настройка для прослушивания на всех интерфейсах (0.0.0.0) для доступа извне
 sudo tee /etc/default/evebox > /dev/null <<'EOEVEBOX'
-EVEBOX_OPTS="--database sqlite /var/log/suricata/eve.json --listen 0.0.0.0:5636"
+EVEBOX_OPTS="--database sqlite /var/log/suricata/eve.json"
 EOEVEBOX
+
+# Настройка EveBox для прослушивания на всех интерфейсах через systemd override
+sudo mkdir -p /etc/systemd/system/evebox.service.d
+sudo tee /etc/systemd/system/evebox.service.d/override.conf > /dev/null <<'EOSERVICE'
+[Service]
+ExecStart=
+ExecStart=/usr/bin/evebox server --database sqlite /var/log/suricata/eve.json --host 0.0.0.0 --port 5636 --tls=false --authentication=false
+EOSERVICE
 
 # Права на чтение логов Suricata
 sudo chown -R root:suricata /var/log/suricata

@@ -50,11 +50,15 @@ jobs:
 
       - name: Copy test files
         run: |
-          scp -o StrictHostKeyChecking=no test1.sh poc.py poc.xml "$HOST:"
+          scp -o StrictHostKeyChecking=no test1.sh test2.sh poc.py poc.xml "$HOST:"
 
-      - name: Run attack simulation test
+      - name: Run attack simulation test (ActiveMQ)
         run: |
           ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test1.sh && bash test1.sh'
+
+      - name: Run Redis attack test
+        run: |
+          ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test2.sh && bash test2.sh'
 
      # - name: Test Suricata
      #   run: |
