@@ -239,7 +239,7 @@ sudo mkdir -p /etc/systemd/system/evebox.service.d
 sudo tee /etc/systemd/system/evebox.service.d/override.conf > /dev/null <<'EOSERVICE'
 [Service]
 ExecStart=
-ExecStart=/usr/bin/evebox server --database sqlite /var/log/suricata/eve.json --host 0.0.0.0 --port 5636 --tls=false --authentication=false
+ExecStart=/usr/bin/evebox server --database sqlite /var/log/suricata/eve.json --host 0.0.0.0 --port 5636 --no-tls --no-authentication-required
 EOSERVICE
 
 # Права на чтение логов Suricata
