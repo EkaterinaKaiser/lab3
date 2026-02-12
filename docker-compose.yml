@@ -132,19 +132,19 @@ services:
     environment:
       - DEBUG=1
 
-  # EveBox для визуализации логов Suricata
-  evebox:
-    image: jasonish/evebox:latest
-    container_name: evebox
-    hostname: evebox
-    networks:
-      vulnnet:
-        ipv4_address: 172.20.0.200
-    ports:
-      - "5636:5636"
-    volumes:
-      - /var/log/suricata/eve.json:/var/log/suricata/eve.json:ro
-    command: -e /var/log/suricata/eve.json
+  # EveBox для визуализации логов Suricata (закомментирован - используем локальную версию)
+  # evebox:
+  #   image: jasonish/evebox:latest
+  #   container_name: evebox
+  #   hostname: evebox
+  #   networks:
+  #     vulnnet:
+  #       ipv4_address: 172.20.0.200
+  #   ports:
+  #     - "5636:5636"
+  #   volumes:
+  #     - /var/log/suricata/eve.json:/var/log/suricata/eve.json:ro
+  #   command: -e /var/log/suricata/eve.json
 
 volumes:
   minio_data1:
