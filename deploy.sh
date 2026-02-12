@@ -109,7 +109,7 @@ alert http any any -> any 9000 (msg:"[IDS] MinIO S3 API Operation Detected"; flo
 alert http any any -> any 9000 (msg:"[IDS] MinIO Bucket Creation Detected"; flow:to_server,established; content:"PUT"; http_method; classtype:policy-violation; sid:3000205; rev:1;)
 
 # Обнаружение подозрительных имен bucket'ов
-alert http any any -> any 9000 (msg:"[IDS] MinIO Suspicious Bucket Name"; flow:to_server,established; pcre:"/\/(hack|exploit|malware|backdoor|pwned|compromised|cve)/i"; http_uri; classtype:trojan-activity; sid:3000206; rev:1;)
+alert http any any -> any 9000 (msg:"[IDS] MinIO Suspicious Bucket Name"; flow:to_server,established; http_uri; pcre:"/\/(hack|exploit|malware|backdoor|pwned|compromised|cve)/i"; classtype:trojan-activity; sid:3000206; rev:1;)
 
 # Обнаружение консольного доступа
 alert http any any -> any 9001 (msg:"[IDS] MinIO Console Access Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000207; rev:1;)
@@ -145,13 +145,13 @@ alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI JAR Download"; flow:to_se
 alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI Command Execution"; flow:to_server,established; content:"Jenkins CLI"; http_user_agent; classtype:attempted-admin; sid:3000503; rev:1;)
 
 # Блокировка CVE-2024-23897 эксплуатации (символ @ в запросах)
-drop http any any -> any 8080 (msg:"[IPS] Jenkins CVE-2024-23897 File Read Blocked"; flow:to_server,established; content:"@/"; http.request_body; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000504; rev:1;)
+drop http any any -> any 8080 (msg:"[IPS] Jenkins CVE-2024-23897 File Read Blocked"; flow:to_server,established; http_client_body; content:"@/"; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000504; rev:1;)
 
 # Обнаружение попыток чтения системных файлов
-alert http any any -> any 8080 (msg:"[IDS] Jenkins System File Access"; flow:to_server,established; pcre:"/@\/(etc|proc|var)/"; http.request_body; classtype:attempted-admin; sid:3000505; rev:1;)
+alert http any any -> any 8080 (msg:"[IDS] Jenkins System File Access"; flow:to_server,established; http_client_body; pcre:"/@\/(etc|proc|var)/"; classtype:attempted-admin; sid:3000505; rev:1;)
 
 # Обнаружение попыток чтения секретов Jenkins
-alert http any any -> any 8080 (msg:"[IDS] Jenkins Secret File Access"; flow:to_server,established; content:"@/var/jenkins_home/secret"; http.request_body; classtype:attempted-admin; sid:3000506; rev:1;)
+alert http any any -> any 8080 (msg:"[IDS] Jenkins Secret File Access"; flow:to_server,established; http_client_body; content:"@/var/jenkins_home/secret"; classtype:attempted-admin; sid:3000506; rev:1;)
 
 # Обнаружение множественных Jenkins CLI операций
 alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI Multiple Operations"; flow:to_server,established; content:"/cli"; http_uri; threshold: type threshold, track by_src, count 10, seconds 60; classtype:attempted-recon; sid:3000507; rev:1;)
@@ -207,6 +207,12 @@ ExecStart=
 ExecStart=/usr/bin/suricata -c /etc/suricata/suricata.yaml -q 1 --pidfile /run/suricata.pid
 EOSERVICE
 
+# Создание файла eve.json (удалить если это директория)
+sudo rm -rf /var/log/suricata/eve.json
+sudo touch /var/log/suricata/eve.json
+sudo chown root:suricata /var/log/suricata/eve.json
+sudo chmod 640 /var/log/suricata/eve.json
+
 # Запуск Suricata
 systemctl daemon-reload
 systemctl enable suricata
@@ -231,11 +237,15 @@ EOEVEBOX
 # Права на чтение логов Suricata
 sudo chown -R root:suricata /var/log/suricata
 sudo chmod 750 /var/log/suricata
-# Удалить eve.json если это директория, затем создать файл
-sudo rm -rf /var/log/suricata/eve.json
-sudo touch /var/log/suricata/eve.json
-sudo chown root:suricata /var/log/suricata/eve.json
-sudo chmod 640 /var/log/suricata/eve.json
+# Убедиться, что eve.json - это файл (не директория)
+if [ -d /var/log/suricata/eve.json ]; then
+    sudo rm -rf /var/log/suricata/eve.json
+    sudo touch /var/log/suricata/eve.json
+    sudo chown root:suricata /var/log/suricata/eve.json
+    sudo chmod 640 /var/log/suricata/eve.json
+    # Перезапустить Suricata после исправления файла
+    sudo systemctl restart suricata
+fi
 
 sudo systemctl daemon-reload
 sudo systemctl restart evebox
