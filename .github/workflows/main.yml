@@ -50,15 +50,41 @@ jobs:
 
       - name: Copy test files
         run: |
-          scp -o StrictHostKeyChecking=no test1.sh test2.sh poc.py poc.xml redis_attack.py "$HOST:"
+          scp -o StrictHostKeyChecking=no test1.sh test2.sh test3.sh poc.py poc.xml redis_attack.py minio_cve_exploit.py "$HOST:"
 
-     # - name: Run attack simulation test (ActiveMQ)
-     #   run: |
-     #     ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test1.sh && bash test1.sh'
+      # - name: Run attack simulation test (ActiveMQ)
+      #   run: |
+      #     ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test1.sh && bash test1.sh'
 
-    #  - name: Run Redis attack test
-    #    run: |
-    #      ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test2.sh && bash test2.sh'
+      # - name: Run Redis attack test
+      #   run: |
+      #     ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test2.sh && bash test2.sh'
+
+      - name: Run MinIO CVE-2023-28432 exploit test
+        run: |
+          ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test3.sh && bash test3.sh'
+
+      - name: Display EveBox credentials
+        run: |
+          echo "=========================================="
+          echo "EveBox Access Information"
+          echo "=========================================="
+          echo ""
+          echo "EveBox URL: http://${{ secrets.CLOUD_HOST }}:5636/"
+          echo ""
+          echo "Searching for credentials in EveBox logs..."
+          CREDS=$(ssh -o StrictHostKeyChecking=no "$HOST" 'sudo journalctl -u evebox --no-pager | grep -i "Created administrator\|username.*password" | tail -1' || echo "")
+          if [ -n "$CREDS" ]; then
+            echo "$CREDS"
+          else
+            echo "No credentials found in logs."
+            echo "EveBox may be running without authentication (check deploy.sh configuration)."
+            echo "Or credentials may have been created earlier. Check logs manually:"
+            echo "  sudo journalctl -u evebox | grep -i 'username\|password\|Created administrator'"
+          fi
+          echo ""
+          echo "To access EveBox, open: http://${{ secrets.CLOUD_HOST }}:5636/"
+          echo "=========================================="
 
      # - name: Test Suricata
      #   run: |

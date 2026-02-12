@@ -97,7 +97,7 @@ alert tcp any any -> any 6379 (msg:"[IDS] Redis Multiple Operations Detected"; f
 alert http any any -> any 9000 (msg:"[IDS] MinIO CVE-2023-28432 Bootstrap Verify Request"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; classtype:attempted-admin; sid:3000201; rev:1;)
 
 # Блокировка CVE-2023-28432 эксплуатации
-#drop http any any -> any 9000 (msg:"[IPS] MinIO CVE-2023-28432 Exploitation Blocked"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000202; rev:1;)
+# drop http any any -> any 9000 (msg:"[IPS] MinIO CVE-2023-28432 Exploitation Blocked"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000202; rev:1;)
 
 # Обнаружение MinIO admin API запросов
 alert http any any -> any 9000 (msg:"[IDS] MinIO Admin API Request Detected"; flow:to_server,established; content:"/minio/admin"; http_uri; classtype:attempted-admin; sid:3000203; rev:1;)
@@ -115,7 +115,7 @@ alert http any any -> any 9000 (msg:"[IDS] MinIO Suspicious Bucket Name"; flow:t
 alert http any any -> any 9001 (msg:"[IDS] MinIO Console Access Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000207; rev:1;)
 
 # Блокировка множественных S3 операций
-#drop http any any -> any 9000 (msg:"[IPS] MinIO Excessive S3 Operations Blocked"; flow:to_server,established; threshold: type both, track by_src, count 50, seconds 60; classtype:attempted-dos; sid:3000208; rev:1;)
+# drop http any any -> any 9000 (msg:"[IPS] MinIO Excessive S3 Operations Blocked"; flow:to_server,established; threshold: type both, track by_src, count 50, seconds 60; classtype:attempted-dos; sid:3000208; rev:1;)
 
 # SMB соединения
 alert tcp any any -> any 445 (msg:"[IDS] SMB Connection Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000301; rev:1;)
