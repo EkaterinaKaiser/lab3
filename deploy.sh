@@ -97,7 +97,7 @@ alert tcp any any -> any 6379 (msg:"[IDS] Redis Multiple Operations Detected"; f
 alert http any any -> any 9000 (msg:"[IDS] MinIO CVE-2023-28432 Bootstrap Verify Request"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; classtype:attempted-admin; sid:3000201; rev:1;)
 
 # Блокировка CVE-2023-28432 эксплуатации
-drop http any any -> any 9000 (msg:"[IPS] MinIO CVE-2023-28432 Exploitation Blocked"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000202; rev:1;)
+#drop http any any -> any 9000 (msg:"[IPS] MinIO CVE-2023-28432 Exploitation Blocked"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000202; rev:1;)
 
 # Обнаружение MinIO admin API запросов
 alert http any any -> any 9000 (msg:"[IDS] MinIO Admin API Request Detected"; flow:to_server,established; content:"/minio/admin"; http_uri; classtype:attempted-admin; sid:3000203; rev:1;)
@@ -115,7 +115,7 @@ alert http any any -> any 9000 (msg:"[IDS] MinIO Suspicious Bucket Name"; flow:t
 alert http any any -> any 9001 (msg:"[IDS] MinIO Console Access Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000207; rev:1;)
 
 # Блокировка множественных S3 операций
-drop http any any -> any 9000 (msg:"[IPS] MinIO Excessive S3 Operations Blocked"; flow:to_server,established; threshold: type both, track by_src, count 50, seconds 60; classtype:attempted-dos; sid:3000208; rev:1;)
+#drop http any any -> any 9000 (msg:"[IPS] MinIO Excessive S3 Operations Blocked"; flow:to_server,established; threshold: type both, track by_src, count 50, seconds 60; classtype:attempted-dos; sid:3000208; rev:1;)
 
 # SMB соединения
 alert tcp any any -> any 445 (msg:"[IDS] SMB Connection Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000301; rev:1;)
@@ -248,28 +248,43 @@ if ! command -v nginx &> /dev/null; then
     sudo apt-get install -y nginx
 fi
 
-# Создание конфигурации nginx для проксирования HTTP на EveBox
+# Создание конфигурации nginx для проксирования HTTP на EveBox (HTTPS)
+# EveBox использует TLS, поэтому проксируем на HTTPS
 sudo tee /etc/nginx/sites-available/evebox > /dev/null <<'EONGINX'
 server {
     listen 5636;
     server_name _;
     
+    # Увеличиваем буферы для больших ответов
+    client_max_body_size 100M;
+    proxy_buffering off;
+    
     location / {
-        proxy_pass http://127.0.0.1:5637;
+        # EveBox использует HTTPS, поэтому проксируем на HTTPS
+        proxy_pass https://127.0.0.1:5637;
+        
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         
-        # WebSocket support (если нужно)
+        # WebSocket support
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         
+        # Отключение проверки SSL сертификата (самоподписанный сертификат EveBox)
+        proxy_ssl_verify off;
+        proxy_ssl_server_name on;
+        
         # Таймауты
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        
+        # Отключение буферизации для streaming
+        proxy_buffering off;
+        proxy_cache off;
     }
 }
 EONGINX

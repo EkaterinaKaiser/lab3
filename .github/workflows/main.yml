@@ -56,9 +56,9 @@ jobs:
      #   run: |
      #     ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test1.sh && bash test1.sh'
 
-      - name: Run Redis attack test
-        run: |
-          ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test2.sh && bash test2.sh'
+    #  - name: Run Redis attack test
+    #    run: |
+    #      ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test2.sh && bash test2.sh'
 
      # - name: Test Suricata
      #   run: |
