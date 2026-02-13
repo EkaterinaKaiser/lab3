@@ -50,7 +50,7 @@ jobs:
 
       - name: Copy test files
         run: |
-          scp -o StrictHostKeyChecking=no test1.sh test2.sh test3.sh test4.sh poc.py poc.xml redis_attack.py minio_cve_exploit.py "$HOST:"
+          scp -o StrictHostKeyChecking=no test1.sh test2.sh test3.sh test4.sh test5.sh poc.py poc.xml redis_attack.py minio_cve_exploit.py jenkins_exploit.py "$HOST:"
 
       # - name: Run attack simulation test (ActiveMQ)
       #   run: |
@@ -64,9 +64,13 @@ jobs:
       #   run: |
       #     ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test3.sh && bash test3.sh'
 
-      - name: Run SambaCry CVE-2017-7494 exploit test
+      # - name: Run SambaCry CVE-2017-7494 exploit test
+      #   run: |
+      #     ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test4.sh && bash test4.sh'
+
+      - name: Run Jenkins CVE-2024-23897 exploit test
         run: |
-          ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test4.sh && bash test4.sh'
+          ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test5.sh && bash test5.sh'
 
       - name: Display EveBox access information
         run: |
