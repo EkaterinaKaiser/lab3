@@ -34,7 +34,14 @@ docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/a
 echo "Зависимости установлены"
 
 echo ""
-echo "=== Шаг 5.5: Инициализация тестовых данных в SMB share ==="
+echo "=== Шаг 5.5: Подготовка директории share в контейнере Samba ==="
+echo "Установка прав на директорию /home/share..."
+# Устанавливаем права на директорию share в контейнере Samba
+docker exec victim-samba bash -c "mkdir -p /home/share && chmod 777 /home/share && chown nobody:nogroup /home/share 2>/dev/null || chown nobody:nobody /home/share 2>/dev/null || true" || echo "Директория уже настроена"
+echo "Права установлены"
+
+echo ""
+echo "=== Шаг 5.6: Инициализация тестовых данных в SMB share ==="
 echo "Создание тестовых файлов в myshare для активации Samba..."
 # Создаем тестовые файлы в SMB share через smbclient
 docker exec attacker bash -c "echo 'test file for SambaCry exploit' | smbclient //172.20.0.104/myshare -N -c 'put - test_init.txt'" || echo "Не удалось создать тестовый файл (это нормально, если share пустой)"

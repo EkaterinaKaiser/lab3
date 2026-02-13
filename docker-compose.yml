@@ -114,6 +114,7 @@ services:
       - "6699:6699" # Для bind shell
     volumes:
       - ./smb.conf:/usr/local/samba/etc/smb.conf
+      - samba_share:/home/share
     tty: true
 
   # Уязвимая служба 5: Jenkins (Arbitrary File Read - CVE-2024-23897)
@@ -150,6 +151,7 @@ volumes:
   minio_data1:
   minio_data2:
   minio_data3:
+  samba_share:
 
 networks:
   vulnnet:
