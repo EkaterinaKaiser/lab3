@@ -17,10 +17,18 @@ if ! docker exec attacker bash -c "command -v java > /dev/null 2>&1"; then
     docker exec attacker bash -c "apt update -qq && apt install -y openjdk-11-jre"
 fi
 
-# Скачиваем jenkins-cli.jar если его нет
-if ! docker exec attacker bash -c "test -f jenkins-cli.jar"; then
-    echo "Скачивание jenkins-cli.jar..."
-    docker exec attacker bash -c "wget -q http://172.20.0.105:8080/jnlpJars/jenkins-cli.jar -O jenkins-cli.jar" || echo "Не удалось скачать jenkins-cli.jar"
+# Скачиваем jenkins-cli.jar в /tmp (где будет запускаться скрипт)
+if ! docker exec attacker bash -c "test -f /tmp/jenkins-cli.jar"; then
+    echo "Скачивание jenkins-cli.jar в /tmp..."
+    docker exec attacker bash -c "cd /tmp && wget -q http://172.20.0.105:8080/jnlpJars/jenkins-cli.jar -O jenkins-cli.jar" || echo "Не удалось скачать jenkins-cli.jar"
+    if docker exec attacker bash -c "test -f /tmp/jenkins-cli.jar"; then
+        echo "jenkins-cli.jar успешно скачан"
+    else
+        echo "Ошибка: не удалось скачать jenkins-cli.jar"
+        exit 1
+    fi
+else
+    echo "jenkins-cli.jar уже существует в /tmp"
 fi
 
 echo "Окружение подготовлено"
