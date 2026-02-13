@@ -70,52 +70,52 @@ cat > /etc/suricata/rules/local.rules <<'EORULES'
 # alert tcp any any -> any 61616 (msg:"[IDS] ActiveMQ Spring Beans Configuration Detected"; flow:to_server,established; content:"<beans"; nocase; classtype:attempted-admin; sid:3000005; rev:1;)
 
 # Обнаружение Redis подключений
-alert tcp any any -> any 6379 (msg:"[IDS] Redis Unauthorized Access Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000101; rev:1;)
+#alert tcp any any -> any 6379 (msg:"[IDS] Redis Unauthorized Access Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000101; rev:1;)
 
 # Обнаружение config команд
-alert tcp any any -> any 6379 (msg:"[IDS] Redis CONFIG Command Detected"; flow:to_server,established; content:"config"; nocase; classtype:attempted-admin; sid:3000102; rev:1;)
+#alert tcp any any -> any 6379 (msg:"[IDS] Redis CONFIG Command Detected"; flow:to_server,established; content:"config"; nocase; classtype:attempted-admin; sid:3000102; rev:1;)
 
 # Обнаружение команды SAVE
-alert tcp any any -> any 6379 (msg:"[IDS] Redis SAVE Command Detected"; flow:to_server,established; content:"save"; nocase; classtype:attempted-admin; sid:3000103; rev:1;)
+#alert tcp any any -> any 6379 (msg:"[IDS] Redis SAVE Command Detected"; flow:to_server,established; content:"save"; nocase; classtype:attempted-admin; sid:3000103; rev:1;)
 
 # Блокировка подозрительных Redis операций
-drop tcp any any -> any 6379 (msg:"[IPS] Redis Dangerous Operation Blocked"; flow:to_server,established; content:"config set dir"; nocase; threshold: type limit, track by_src, count 1, seconds 60; classtype:attempted-admin; sid:3000104; rev:1;)
+#drop tcp any any -> any 6379 (msg:"[IPS] Redis Dangerous Operation Blocked"; flow:to_server,established; content:"config set dir"; nocase; threshold: type limit, track by_src, count 1, seconds 60; classtype:attempted-admin; sid:3000104; rev:1;)
 
 # Обнаружение попыток записи веб-шелла
-alert tcp any any -> any 6379 (msg:"[IDS] Redis Web Shell Upload Attempt"; flow:to_server,established; content:"<?php"; nocase; classtype:trojan-activity; sid:3000105; rev:1;)
+#alert tcp any any -> any 6379 (msg:"[IDS] Redis Web Shell Upload Attempt"; flow:to_server,established; content:"<?php"; nocase; classtype:trojan-activity; sid:3000105; rev:1;)
 
 # Обнаружение манипуляций с dbfilename
-alert tcp any any -> any 6379 (msg:"[IDS] Redis DBFilename Manipulation"; flow:to_server,established; content:"dbfilename"; nocase; classtype:attempted-admin; sid:3000106; rev:1;)
+#alert tcp any any -> any 6379 (msg:"[IDS] Redis DBFilename Manipulation"; flow:to_server,established; content:"dbfilename"; nocase; classtype:attempted-admin; sid:3000106; rev:1;)
 
 # Обнаружение команды FLUSHALL
-alert tcp any any -> any 6379 (msg:"[IDS] Redis FLUSHALL Command Detected"; flow:to_server,established; content:"flushall"; nocase; classtype:attempted-admin; sid:3000107; rev:1;)
+#alert tcp any any -> any 6379 (msg:"[IDS] Redis FLUSHALL Command Detected"; flow:to_server,established; content:"flushall"; nocase; classtype:attempted-admin; sid:3000107; rev:1;)
 
 # Обнаружение множественных операций (brute-force/scan)
-alert tcp any any -> any 6379 (msg:"[IDS] Redis Multiple Operations Detected"; flow:to_server,established; threshold: type threshold, track by_src, count 20, seconds 60; classtype:attempted-recon; sid:3000108; rev:1;)
+#alert tcp any any -> any 6379 (msg:"[IDS] Redis Multiple Operations Detected"; flow:to_server,established; threshold: type threshold, track by_src, count 20, seconds 60; classtype:attempted-recon; sid:3000108; rev:1;)
 
 # Обнаружение CVE-2023-28432 Bootstrap Verify запроса
-alert http any any -> any 9000 (msg:"[IDS] MinIO CVE-2023-28432 Bootstrap Verify Request"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; classtype:attempted-admin; sid:3000201; rev:1;)
+#alert http any any -> any 9000 (msg:"[IDS] MinIO CVE-2023-28432 Bootstrap Verify Request"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; classtype:attempted-admin; sid:3000201; rev:1;)
 
 # Блокировка CVE-2023-28432 эксплуатации
-drop http any any -> any 9000 (msg:"[IPS] MinIO CVE-2023-28432 Exploitation Blocked"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000202; rev:1;)
+#drop http any any -> any 9000 (msg:"[IPS] MinIO CVE-2023-28432 Exploitation Blocked"; flow:to_server,established; content:"/minio/bootstrap/v1/verify"; http_uri; content:"POST"; http_method; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000202; rev:1;)
 
 # Обнаружение MinIO admin API запросов
-alert http any any -> any 9000 (msg:"[IDS] MinIO Admin API Request Detected"; flow:to_server,established; content:"/minio/admin"; http_uri; classtype:attempted-admin; sid:3000203; rev:1;)
+#alert http any any -> any 9000 (msg:"[IDS] MinIO Admin API Request Detected"; flow:to_server,established; content:"/minio/admin"; http_uri; classtype:attempted-admin; sid:3000203; rev:1;)
 
 # Обнаружение S3 API операций
-alert http any any -> any 9000 (msg:"[IDS] MinIO S3 API Operation Detected"; flow:to_server,established; content:"aws4_request"; http_header; classtype:policy-violation; sid:3000204; rev:1;)
+#alert http any any -> any 9000 (msg:"[IDS] MinIO S3 API Operation Detected"; flow:to_server,established; content:"aws4_request"; http_header; classtype:policy-violation; sid:3000204; rev:1;)
 
 # Обнаружение создания bucket'ов
-alert http any any -> any 9000 (msg:"[IDS] MinIO Bucket Creation Detected"; flow:to_server,established; content:"PUT"; http_method; classtype:policy-violation; sid:3000205; rev:1;)
+#alert http any any -> any 9000 (msg:"[IDS] MinIO Bucket Creation Detected"; flow:to_server,established; content:"PUT"; http_method; classtype:policy-violation; sid:3000205; rev:1;)
 
 # Обнаружение подозрительных имен bucket'ов
-alert http any any -> any 9000 (msg:"[IDS] MinIO Suspicious Bucket Name"; flow:to_server,established; http_uri; pcre:"/\/(hack|exploit|malware|backdoor|pwned|compromised|cve)/i"; classtype:trojan-activity; sid:3000206; rev:1;)
+#alert http any any -> any 9000 (msg:"[IDS] MinIO Suspicious Bucket Name"; flow:to_server,established; http_uri; pcre:"/\/(hack|exploit|malware|backdoor|pwned|compromised|cve)/i"; classtype:trojan-activity; sid:3000206; rev:1;)
 
 # Обнаружение консольного доступа
-alert http any any -> any 9001 (msg:"[IDS] MinIO Console Access Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000207; rev:1;)
+#alert http any any -> any 9001 (msg:"[IDS] MinIO Console Access Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000207; rev:1;)
 
 # Блокировка множественных S3 операций
-drop http any any -> any 9000 (msg:"[IPS] MinIO Excessive S3 Operations Blocked"; flow:to_server,established; threshold: type both, track by_src, count 50, seconds 60; classtype:attempted-dos; sid:3000208; rev:1;)
+#drop http any any -> any 9000 (msg:"[IPS] MinIO Excessive S3 Operations Blocked"; flow:to_server,established; threshold: type both, track by_src, count 50, seconds 60; classtype:attempted-dos; sid:3000208; rev:1;)
 
 # SMB соединения
 alert tcp any any -> any 445 (msg:"[IDS] SMB Connection Detected"; flow:to_server,established; threshold: type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:3000301; rev:1;)
@@ -145,7 +145,7 @@ alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI JAR Download"; flow:to_se
 alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI Command Execution"; flow:to_server,established; content:"Jenkins CLI"; http_user_agent; classtype:attempted-admin; sid:3000503; rev:1;)
 
 # Блокировка CVE-2024-23897 эксплуатации (символ @ в запросах)
-drop http any any -> any 8080 (msg:"[IPS] Jenkins CVE-2024-23897 File Read Blocked"; flow:to_server,established; http_client_body; content:"@/"; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000504; rev:1;)
+#drop http any any -> any 8080 (msg:"[IPS] Jenkins CVE-2024-23897 File Read Blocked"; flow:to_server,established; http_client_body; content:"@/"; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000504; rev:1;)
 
 # Обнаружение попыток чтения системных файлов
 alert http any any -> any 8080 (msg:"[IDS] Jenkins System File Access"; flow:to_server,established; http_client_body; pcre:"/@\/(etc|proc|var)/"; classtype:attempted-admin; sid:3000505; rev:1;)
@@ -166,7 +166,7 @@ alert tcp any any -> any 5005 (msg:"[IDS] Jenkins Debug Port Access"; flow:to_se
 alert http any any -> any 8080 (msg:"[IDS] Jenkins CLI HTTP POST"; flow:to_server,established; content:"POST"; http_method; content:"/cli"; http_uri; classtype:attempted-admin; sid:3000510; rev:1;)
 
 # Блокировка агрессивного сканирования Jenkins
-drop http any any -> any 8080 (msg:"[IPS] Jenkins Aggressive Scanning Blocked"; flow:to_server,established; threshold: type both, track by_src, count 50, seconds 120; classtype:attempted-dos; sid:3000511; rev:1;)
+#drop http any any -> any 8080 (msg:"[IPS] Jenkins Aggressive Scanning Blocked"; flow:to_server,established; threshold: type both, track by_src, count 50, seconds 120; classtype:attempted-dos; sid:3000511; rev:1;)
 
 # Обнаружение reverse shell паттернов
 alert tcp any any -> any any (msg:"[IDS] Reverse Shell Pattern /bin/sh Detected"; flow:established; content:"/bin/sh"; nocase; classtype:trojan-activity; sid:3000601; rev:1;)
@@ -236,11 +236,12 @@ EOEVEBOX
 
 # Настройка EveBox для прослушивания на localhost:5637 (внутренний порт)
 # Используем nginx как reverse proxy для HTTP доступа
+# Отключаем аутентификацию и TLS для упрощения доступа
 sudo mkdir -p /etc/systemd/system/evebox.service.d
 sudo tee /etc/systemd/system/evebox.service.d/override.conf > /dev/null <<'EOSERVICE'
 [Service]
 ExecStart=
-ExecStart=/usr/bin/evebox server --database sqlite /var/log/suricata/eve.json --host 127.0.0.1 --port 5637
+ExecStart=/usr/bin/evebox server --database sqlite /var/log/suricata/eve.json --host 127.0.0.1 --port 5637 --no-tls --no-auth
 EOSERVICE
 
 # Установка и настройка nginx как reverse proxy для EveBox
@@ -248,8 +249,7 @@ if ! command -v nginx &> /dev/null; then
     sudo apt-get install -y nginx
 fi
 
-# Создание конфигурации nginx для проксирования HTTP на EveBox (HTTPS)
-# EveBox использует TLS, поэтому проксируем на HTTPS
+# Создание конфигурации nginx для проксирования HTTP на EveBox (HTTP, т.к. TLS отключен)
 sudo tee /etc/nginx/sites-available/evebox > /dev/null <<'EONGINX'
 server {
     listen 5636;
@@ -260,8 +260,8 @@ server {
     proxy_buffering off;
     
     location / {
-        # EveBox использует HTTPS, поэтому проксируем на HTTPS
-        proxy_pass https://127.0.0.1:5637;
+        # EveBox использует HTTP (TLS отключен), поэтому проксируем на HTTP
+        proxy_pass http://127.0.0.1:5637;
         
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -272,10 +272,6 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        
-        # Отключение проверки SSL сертификата (самоподписанный сертификат EveBox)
-        proxy_ssl_verify off;
-        proxy_ssl_server_name on;
         
         # Таймауты
         proxy_connect_timeout 300s;
