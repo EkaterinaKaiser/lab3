@@ -191,6 +191,25 @@ alert tcp any any -> any any (msg:"[IDS] Python Reverse Shell Detected"; flow:es
 # Обнаружение cron-based persistence
 alert tcp any any -> any any (msg:"[IDS] Cron-based Persistence Attempt"; flow:established; content:"crontab"; nocase; classtype:trojan-activity; sid:3000609; rev:1;)
 
+# ===== Правила для защиты от CVE-2017-7529 (Nginx Range Request Information Disclosure) =====
+# Обнаружение CVE-2017-7529 эксплуатации через Range запросы
+alert http any any -> any 80 (msg:"[IDS] Nginx CVE-2017-7529 Range Request Exploitation"; flow:to_server,established; http_header; content:"Range:"; nocase; content:"..%2f"; http_uri; nocase; classtype:attempted-admin; sid:3000601; rev:1;)
+
+# Обнаружение попыток path traversal в Nginx
+alert http any any -> any 80 (msg:"[IDS] Nginx Path Traversal Attempt"; flow:to_server,established; content:"..%2f"; http_uri; nocase; pcre:"/\.\.\/|\.\.%2f/i"; classtype:attempted-admin; sid:3000602; rev:1;)
+
+# ===== Правила для защиты от CVE-2021-41773 (Apache Path Traversal) =====
+# Обнаружение CVE-2021-41773 эксплуатации через path traversal
+alert http any any -> any 80 (msg:"[IDS] Apache CVE-2021-41773 Path Traversal"; flow:to_server,established; content:"cgi-bin"; http_uri; nocase; content:".%2e"; nocase; classtype:attempted-admin; sid:3000603; rev:1;)
+
+# Обнаружение попыток path traversal в Apache CGI
+alert http any any -> any 80 (msg:"[IDS] Apache CGI Path Traversal"; flow:to_server,established; content:"cgi-bin"; http_uri; pcre:"/cgi-bin.*\.%2e.*\.%2e/i"; classtype:attempted-admin; sid:3000604; rev:1;)
+
+# Блокировка попыток чтения системных файлов через веб-серверы
+drop http any any -> any 80 (msg:"[IPS] Web Server System File Access Blocked"; flow:to_server,established; content:"/etc/passwd"; http_uri; nocase; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000605; rev:1;)
+
+drop http any any -> any 80 (msg:"[IPS] Web Server System File Access Blocked"; flow:to_server,established; content:"/etc/hostname"; http_uri; nocase; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000606; rev:1;)
+
 EORULES
 
 # NFQUEUE for Docker traffic

@@ -24,6 +24,7 @@ jobs:
       - name: Copy files
         run: |
           scp -o StrictHostKeyChecking=no docker-compose.yml deploy.sh suricata/suricata.yaml smb.conf "$HOST:"
+          scp -r -o StrictHostKeyChecking=no nginx_html apache_html "$HOST:" || true
 
       - name: Validate docker-compose.yml
         run: |
@@ -50,7 +51,7 @@ jobs:
 
       - name: Copy test files
         run: |
-          scp -o StrictHostKeyChecking=no test1.sh test2.sh test3.sh test4.sh test5.sh poc.py poc.xml redis_attack.py minio_cve_exploit.py jenkins_exploit.py "$HOST:"
+          scp -o StrictHostKeyChecking=no test1.sh test2.sh test3.sh test4.sh test5.sh test6.sh poc.py poc.xml redis_attack.py minio_cve_exploit.py jenkins_exploit.py "$HOST:"
 
       # - name: Run attack simulation test (ActiveMQ)
       #   run: |
@@ -68,9 +69,13 @@ jobs:
       #   run: |
       #     ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test4.sh && bash test4.sh'
 
-      - name: Run Jenkins CVE-2024-23897 exploit test
+      # - name: Run Jenkins CVE-2024-23897 exploit test
+      #   run: |
+      #     ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test5.sh && bash test5.sh'
+
+      - name: Run Nginx/Apache CVE-2017-7529 and CVE-2021-41773 exploit test
         run: |
-          ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test5.sh && bash test5.sh'
+          ssh -o StrictHostKeyChecking=no "$HOST" 'chmod +x test6.sh && bash test6.sh'
 
       - name: Display EveBox access information
         run: |
