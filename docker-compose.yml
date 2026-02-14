@@ -135,7 +135,7 @@ services:
 
   # Уязвимая служба 6: Nginx (Information Disclosure - CVE-2017-7529)
   victim-nginx:
-    image: vulhub/nginx:1.13.2
+    image: vulhub/nginx:1.13.1
     container_name: victim-nginx
     hostname: victim-nginx
     networks:
@@ -147,17 +147,16 @@ services:
       - ./nginx_html:/usr/share/nginx/html:ro
 
   # Уязвимая служба 7: Apache HTTP Server (Path Traversal - CVE-2021-41773)
-  victim-apache:
-    image: vulhub/httpd:2.4.49
-    container_name: victim-apache
-    hostname: victim-apache
+  victim-struts:
+    image: vulhub/struts2:2.3.15.1
+    container_name: victim-struts
+    hostname: victim-struts
     networks:
       vulnnet:
-        ipv4_address: 172.20.0.107
+        ipv4_address: 172.20.0.106
     ports:
-      - "8081:80"
-    volumes:
-      - ./apache_html:/usr/local/apache2/htdocs:ro
+      - "8080:8080"
+
 
   # EveBox для визуализации логов Suricata (закомментирован - используем локальную версию)
   # evebox:
