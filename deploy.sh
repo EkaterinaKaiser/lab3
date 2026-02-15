@@ -206,9 +206,9 @@ alert http any any -> any 80 (msg:"[IDS] Apache CVE-2021-41773 Path Traversal"; 
 alert http any any -> any 80 (msg:"[IDS] Apache CGI Path Traversal"; flow:to_server,established; content:"cgi-bin"; http_uri; pcre:"/cgi-bin.*\.%2e.*\.%2e/i"; classtype:attempted-admin; sid:3000604; rev:1;)
 
 # Блокировка попыток чтения системных файлов через веб-серверы
-drop http any any -> any 80 (msg:"[IPS] Web Server System File Access Blocked"; flow:to_server,established; content:"/etc/passwd"; http_uri; nocase; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000605; rev:1;)
+#drop http any any -> any 80 (msg:"[IPS] Web Server System File Access Blocked"; flow:to_server,established; content:"/etc/passwd"; http_uri; nocase; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000605; rev:1;)
 
-drop http any any -> any 80 (msg:"[IPS] Web Server System File Access Blocked"; flow:to_server,established; content:"/etc/hostname"; http_uri; nocase; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000606; rev:1;)
+#drop http any any -> any 80 (msg:"[IPS] Web Server System File Access Blocked"; flow:to_server,established; content:"/etc/hostname"; http_uri; nocase; threshold: type limit, track by_src, count 1, seconds 3600; classtype:attempted-admin; sid:3000606; rev:1;)
 
 EORULES
 
