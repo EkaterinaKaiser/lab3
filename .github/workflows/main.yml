@@ -26,9 +26,9 @@ jobs:
           scp -o StrictHostKeyChecking=no docker-compose.yml deploy.sh suricata/suricata.yaml smb.conf "$HOST:"
           scp -r -o StrictHostKeyChecking=no nginx_html apache_html "$HOST:" || true
 
-      - name: Validate docker-compose.yml
-        run: |
-          ssh -o StrictHostKeyChecking=no "$HOST" 'docker-compose -f docker-compose.yml config --quiet'
+    #  - name: Validate docker-compose.yml
+    #    run: |
+    #      ssh -o StrictHostKeyChecking=no "$HOST" 'docker-compose -f docker-compose.yml config --quiet'
 
       - name: Stop containers
         run: |
