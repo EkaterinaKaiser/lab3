@@ -47,11 +47,17 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no "$HOST" 'docker exec attacker apt update -qq'
           ssh -o StrictHostKeyChecking=no "$HOST" 'docker exec attacker apt install -y vim nmap jq metasploit-framework netcat-traditional telnet smbclient redis-tools python3-pip python3.13-venv curl wget python3 python3-pip awscli openssh-client hydra python2.7 python2.7-dev git gcc file openjdk-11-jre'
+          ssh -o StrictHostKeyChecking=no "$HOST" 'docker exec attacker pip3 install requests'
           sleep 5
 
       - name: Copy test files
         run: |
-          scp -o StrictHostKeyChecking=no test1.sh test2.sh test3.sh test4.sh test5.sh poc.py poc.xml redis_attack.py minio_cve_exploit.py jenkins_exploit.py "$HOST:"
+          scp -o StrictHostKeyChecking=no test1.sh test2.sh test3.sh test4.sh test5.sh poc.py poc.xml poc6.py redis_attack.py minio_cve_exploit.py jenkins_exploit.py "$HOST:"
+
+      - name: Copy poc6.py to attacker container
+        run: |
+          ssh -o StrictHostKeyChecking=no "$HOST" 'docker cp poc6.py attacker:/poc6.py'
+          ssh -o StrictHostKeyChecking=no "$HOST" 'docker exec attacker chmod +x /poc6.py'
 
       # - name: Run attack simulation test (ActiveMQ)
       #   run: |
@@ -138,6 +144,11 @@ jobs:
           echo "🔗 Direct Link: $EVEBOX_URL"
           echo "=========================================="
           echo ""
+
+      - name: Run poc6.py exploit
+        run: |
+          echo "=== Запуск poc6.py для эксплуатации CVE-2017-7529 (Nginx) ==="
+          ssh -o StrictHostKeyChecking=no "$HOST" 'docker exec attacker python3 /poc6.py http://172.20.0.106:8080/'
 
      # - name: Test Suricata
      #   run: |
