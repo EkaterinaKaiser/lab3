@@ -134,28 +134,28 @@ services:
  #     - DEBUG=1
 
   # Уязвимая служба 6: Nginx (Information Disclosure - CVE-2017-7529)
-  victim-nginx:
-    image: vulhub/nginx:1.13.2
-    container_name: victim-nginx
-    hostname: victim-nginx
-    networks:
-      vulnnet:
-        ipv4_address: 172.20.0.106
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx_html:/usr/share/nginx/html:ro
+  #victim-nginx:
+  #  image: vulhub/nginx:1.13.2
+  #  container_name: victim-nginx
+ #   hostname: victim-nginx
+  #  networks:
+  #    vulnnet:
+  #      ipv4_address: 172.20.0.106
+  #  ports:
+    #  - "80:80"
+   # volumes:
+  #    - ./nginx_html:/usr/share/nginx/html:ro
 
   # Уязвимая служба 7: Apache HTTP Server (Path Traversal - CVE-2021-41773)
-  victim-struts:
-    image: vulhub/httpd:2.4.49
-    container_name: victim-httpd
-    hostname: victim-httpd
-    networks:
-      vulnnet:
-        ipv4_address: 172.20.0.107
-    ports:
-      - "8080:8080"
+  #victim-struts:
+  #  image: vulhub/httpd:2.4.49
+ #   container_name: victim-httpd
+  #  hostname: victim-httpd
+  #  networks:
+  #    vulnnet:
+  #      ipv4_address: 172.20.0.107
+  #  ports:
+  #    - "8080:8080"
 
 
   # EveBox для визуализации логов Suricata (закомментирован - используем локальную версию)
@@ -173,10 +173,10 @@ services:
   #   command: -e /var/log/suricata/eve.json
 
 volumes:
-  minio_data1:
-  minio_data2:
-  minio_data3:
-  samba_share:
+  #minio_data1:
+  #minio_data2:
+  #minio_data3:
+  #samba_share:
 
 networks:
   vulnnet:
