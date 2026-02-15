@@ -149,7 +149,7 @@ jobs:
       - name: Run poc6.py exploit
         run: |
           echo "=== Запуск poc6.py для эксплуатации CVE-2017-7529 (Nginx) ==="
-          ssh -o StrictHostKeyChecking=no "$HOST" 'docker exec attacker /venv/bin/python3 /poc6.py http://172.20.0.106:8080/'
+          ssh -o StrictHostKeyChecking=no "$HOST" 'docker exec attacker /venv/bin/python3 /poc6.py http://172.20.0.106:80/'
 
      # - name: Test Suricata
      #   run: |
