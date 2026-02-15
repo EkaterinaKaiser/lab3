@@ -172,12 +172,6 @@ services:
   #     - /var/log/suricata/eve.json:/var/log/suricata/eve.json:ro
   #   command: -e /var/log/suricata/eve.json
 
-volumes:
-  #minio_data1:
-  #minio_data2:
-  #minio_data3:
-  #samba_share:
-
 networks:
   vulnnet:
     driver: bridge
