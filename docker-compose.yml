@@ -135,7 +135,7 @@ services:
 
   # Уязвимая служба 6: Nginx (Information Disclosure - CVE-2017-7529)
   victim-nginx:
-    image: vulhub/nginx:1.13.1
+    image: vulhub/nginx:1.13.2
     container_name: victim-nginx
     hostname: victim-nginx
     networks:
